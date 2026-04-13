@@ -1,3 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>CNC Quote System</title>
+</head>
+<body>
+
+<h2>CNC Quote System</h2>
+
+<div id="drop" style="border:2px dashed #888;padding:20px;">
+  📄 Drag & Drop PDF Here
+</div>
+
+<br>
+
+Qty: <input id="qty" type="number" value="10"><br><br>
+
+<pre id="out"></pre>
+
 <script>
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
@@ -8,10 +27,13 @@ drop.ondrop = (e) => {
   e.preventDefault();
   const file = e.dataTransfer.files[0];
 
+  const qty = document.getElementById("qty").value;
+
   const price = 75;
 
   out.textContent =
     "File: " + file.name +
+    "\\nQty: " + qty +
     "\\nPrice/Part: $" + price;
 };
 </script>
