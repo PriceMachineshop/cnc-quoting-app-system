@@ -18,25 +18,21 @@
 Qty:
 <input id="qty" type="number" value="10"><br><br>
 
-Material:
-<select id="material">
-  <option value="aluminum">Aluminum</option>
-  <option value="steel">Steel</option>
-</select><br><br>
-
 Material Cost (per part $):
 <input id="matCost" type="number" value="25"><br><br>
 
-OD:
+Stock OD:
 <input id="od" type="number" value="2">
 
-ID:
+Final ID:
 <input id="id" type="number" value="0">
 
 Length:
 <input id="length" type="number" value="4"><br><br>
 
 <pre id="out" style="border:1px solid #000;padding:10px;background:#f0f0f0;"></pre>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <script>
 const LATHE_RATE = 110;
@@ -45,6 +41,13 @@ const PROGRAM_RATE = 120;
 
 let fileName = "";
 
+// VOLUME (material removal)
+function volumeRemoved(od,id,len){
+  const ro = od/2;
+  const ri = id/2;
+  return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
+}
+
 // DRAG & DROP
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
@@ -52,7 +55,7 @@ const fileDiv = document.getElementById("file");
 
 drop.ondragover = e => e.preventDefault();
 
-drop.ondrop = (e) => {
+drop.ondrop = async (e) => {
   e.preventDefault();
 
   const file = e.dataTransfer.files[0];
@@ -61,13 +64,28 @@ drop.ondrop = (e) => {
   fileName = file.name;
   fileDiv.innerText = "Loaded: " + file.name;
 
-  const lower = file.name.toLowerCase();
+  // READ PDF TEXT USING pdf.js
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
 
+  let text = "";
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(i => i.str).join(" ");
+  }
+
+  const lower = text.toLowerCase();
+
+  // REAL DETECTION FROM PDF TEXT
   window.detected = {
     holes: (lower.match(/hole/g) || []).length,
     threads: (lower.match(/thread/g) || []).length,
     acme: lower.includes("acme"),
-    stub: lower.includes("stub")
+    stub: lower.includes("stub"),
+    pitch: lower.includes("pitch"),
+    tolerance: lower.includes("±") || lower.includes("tolerance")
   };
 
   calculate();
@@ -82,6 +100,7 @@ function calculate(){
   const threads = window.detected?.threads || 0;
   const acme = window.detected?.acme;
   const stub = window.detected?.stub;
+  const tolerance = window.detected?.tolerance;
 
   const qty = +document.getElementById("qty").value;
   const matCost = +document.getElementById("matCost").value;
@@ -90,15 +109,24 @@ function calculate(){
   const id = +document.getElementById("id").value;
   const len = +document.getElementById("length").value;
 
-  // TIME
-  let lathe = 0.5 + threads * 0.04;
-  if(acme) lathe += 0.5;
-  if(stub) lathe += 0.25;
+  // MATERIAL REMOVAL (drives lathe time)
+  const vol = volumeRemoved(od,id,len);
 
-  const mill = 0.75 + holes * 0.02;
-  const prog = 1;
+  // LATHE TIME (based on material removed)
+  let lathe = 0.3 + vol * 0.02;
 
-  // PRICE PER PART
+  if(threads) lathe += threads * 0.05;
+  if(acme) lathe += 0.75;
+  if(stub) lathe += 0.35;
+  if(tolerance) lathe += 0.25;
+
+  // MILL TIME
+  let mill = 0.5 + holes * 0.03;
+
+  // PROGRAM TIME
+  const prog = 1.2;
+
+  // PRICE
   const price = (
     lathe * LATHE_RATE +
     mill * MILL_RATE +
@@ -110,32 +138,28 @@ function calculate(){
 
   // OUTPUT
   out.textContent =
-    "File: " + fileName + "\n" +
-    "Qty: " + qty + "\n\n" +
+    "File: " + fileName + "\n\n" +
 
     "Holes: " + holes + "\n" +
     "Threads: " + threads + "\n" +
-    "ACME Thread: " + (acme ? "YES" : "NO") + "\n" +
-    "Stub Thread: " + (stub ? "YES" : "NO") + "\n\n" +
+    "ACME: " + (acme ? "YES" : "NO") + "\n" +
+    "Stub: " + (stub ? "YES" : "NO") + "\n" +
+    "Tolerance: " + (tolerance ? "YES" : "NO") + "\n\n" +
 
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
 
-    "Material Cost (per part): $" + matCost.toFixed(2) + "\n\n" +
+    "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
 
     "Price/Part: $" + price.toFixed(2) + "\n" +
     "Total: $" + total.toFixed(2);
 }
 
 // AUTO UPDATE
-document.querySelectorAll("input, select").forEach(el => {
+document.querySelectorAll("input").forEach(el => {
   el.oninput = calculate;
 });
 </script>
 
 </body>
 </html>
-
-
-
- 
