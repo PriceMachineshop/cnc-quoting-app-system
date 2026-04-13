@@ -24,8 +24,8 @@ Material:
   <option value="steel">Steel</option>
 </select><br><br>
 
-Material Price ($/lb):
-<input id="matPrice" type="number" value="2.50"><br><br>
+Material Cost (per part $):
+<input id="matCost" type="number" value="25"><br><br>
 
 OD:
 <input id="od" type="number" value="2">
@@ -43,21 +43,9 @@ const LATHE_RATE = 110;
 const MILL_RATE = 130;
 const PROGRAM_RATE = 120;
 
-const density = {
-  aluminum: 0.0975,
-  steel: 0.283
-};
-
 let fileName = "";
 
-// weight calculation
-function weight(od,id,len,mat){
-  const ro = od/2;
-  const ri = id/2;
-  return (Math.PI*ro*ro*len - Math.PI*ri*ri*len) * density[mat];
-}
-
-// DRAG & DROP (SAFE VERSION)
+// DRAG & DROP
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
 const fileDiv = document.getElementById("file");
@@ -67,31 +55,25 @@ drop.ondragover = e => e.preventDefault();
 drop.ondrop = (e) => {
   e.preventDefault();
 
-  try {
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
 
-    fileName = file.name;
-    fileDiv.innerText = "Loaded: " + file.name;
+  fileName = file.name;
+  fileDiv.innerText = "Loaded: " + file.name;
 
-    const lower = file.name.toLowerCase();
+  const lower = file.name.toLowerCase();
 
-    // BASIC FEATURE DETECTION (filename-based)
-    window.detected = {
-      holes: (lower.match(/hole/g) || []).length,
-      threads: (lower.match(/thread/g) || []).length,
-      acme: lower.includes("acme"),
-      stub: lower.includes("stub")
-    };
+  window.detected = {
+    holes: (lower.match(/hole/g) || []).length,
+    threads: (lower.match(/thread/g) || []).length,
+    acme: lower.includes("acme"),
+    stub: lower.includes("stub")
+  };
 
-    calculate();
-
-  } catch (err) {
-    out.textContent = "Error: " + err.message;
-  }
+  calculate();
 };
 
-// MAIN CALCULATION
+// CALCULATION
 function calculate(){
 
   if(!fileName) return;
@@ -102,31 +84,26 @@ function calculate(){
   const stub = window.detected?.stub;
 
   const qty = +document.getElementById("qty").value;
-  const mat = document.getElementById("material").value;
-  const matPrice = +document.getElementById("matPrice").value;
+  const matCost = +document.getElementById("matCost").value;
 
   const od = +document.getElementById("od").value;
   const id = +document.getElementById("id").value;
   const len = +document.getElementById("length").value;
 
-  const w = weight(od,id,len,mat);
-
-  // TIME CALCULATIONS
-  let lathe = 0.5 + w*0.05 + threads*0.04;
+  // TIME
+  let lathe = 0.5 + threads * 0.04;
   if(acme) lathe += 0.5;
   if(stub) lathe += 0.25;
 
-  const mill = 0.75 + holes*0.02;
+  const mill = 0.75 + holes * 0.02;
   const prog = 1;
 
-  // COSTS
-  const materialCost = w * matPrice;
-
+  // PRICE PER PART
   const price = (
     lathe * LATHE_RATE +
     mill * MILL_RATE +
     (prog / qty) * PROGRAM_RATE +
-    materialCost
+    matCost
   );
 
   const total = price * qty;
@@ -144,14 +121,13 @@ function calculate(){
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
 
-    "Weight: " + w.toFixed(2) + " lbs\n" +
-    "Material Cost: $" + materialCost.toFixed(2) + "\n\n" +
+    "Material Cost (per part): $" + matCost.toFixed(2) + "\n\n" +
 
     "Price/Part: $" + price.toFixed(2) + "\n" +
     "Total: $" + total.toFixed(2);
 }
 
-// AUTO RECALCULATE
+// AUTO UPDATE
 document.querySelectorAll("input, select").forEach(el => {
   el.oninput = calculate;
 });
@@ -162,3 +138,4 @@ document.querySelectorAll("input, select").forEach(el => {
 
 
 
+ 
