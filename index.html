@@ -30,9 +30,18 @@ Length: <input id="length" type="number" value="4"><br><br>
 <pre id="out"></pre>
 
 <script>
-const LATHE_RATE = 110;
-const MILL_RATE = 130;
-const PROGRAM_RATE = 120;
+const LATHE_RATE = 120;
+    function detectFeatures(fileName){
+  const name = fileName.toLowerCase();
+
+  return {
+    holes: (name.match(/hole/g)||[]).length,
+    threads: (name.match(/thread/g)||[]).length
+  };
+}
+const MILL_RATE = 120;
+const PROGRAM_RATE = 100;
+  
 
 const density = { aluminum: 0.0975, steel: 0.283 };
 
@@ -52,14 +61,16 @@ drop.ondragover = e => e.preventDefault();
 drop.ondrop = (e) => {
   e.preventDefault();
   const file = e.dataTransfer.files[0];
-  fileName = file.name;
-  fileDiv.innerText = "Loaded: " + file.name;
-  calculate();
+ fileName = file.name;
+const features = detectFeatures(fileName);
+window.detected = features;
 };
 
 function calculate(){
   if(!fileName) return;
-
+  
+  const holes = window.detected?.holes || 0;
+  const threads = window.detected?.threads || 0;
   const qty = +document.getElementById("qty").value;
   const mat = document.getElementById("material").value;
   const od = +document.getElementById("od").value;
@@ -68,8 +79,8 @@ function calculate(){
 
   const w = weight(od,id,len,mat);
 
-  const lathe = 0.5 + w*0.05;
-  const mill = 0.75;
+const lathe = 0.5 + w*0.05 + threads*0.04;
+const mill = 0.75 + holes*0.02;
   const prog = 1;
 
   const price = (lathe*LATHE_RATE + mill*MILL_RATE + (prog/qty)*PROGRAM_RATE) + w*2;
@@ -79,6 +90,8 @@ function calculate(){
     "File: " + fileName + "\\n" +
     "Lathe Time: " + lathe.toFixed(2) + " hrs\\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\\n" +
+    "Holes: " + holes + "\\n" +
+    "Threads: " + threads + "\\n" +
     "Weight: " + w.toFixed(2) + " lbs\\n" +
     "Price/Part: $" + price.toFixed(2) + "\\n" +
     "Total: $" + total.toFixed(2);
