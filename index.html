@@ -32,6 +32,7 @@ Length:
 
 <pre id="out" style="border:1px solid #000;padding:10px;background:#f0f0f0;"></pre>
 
+<!-- ✅ FIXED PDF.JS -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <script>
@@ -41,22 +42,23 @@ const PROGRAM_RATE = 120;
 
 let fileName = "";
 
-// MATERIAL REMOVAL (drives lathe time)
+// 🔧 FIX: disable worker (CRITICAL for Electron)
+pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+
+// MATERIAL REMOVAL
 function volumeRemoved(od,id,len){
   const ro = od/2;
   const ri = id/2;
   return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
 }
 
-// UI ELEMENTS
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
 const fileDiv = document.getElementById("file");
 
-// DRAG OVER
 drop.ondragover = e => e.preventDefault();
 
-// DROP FUNCTION (PDF READING)
+// 🚀 FIXED DROP FUNCTION
 drop.ondrop = async (e) => {
   e.preventDefault();
 
@@ -67,23 +69,38 @@ drop.ondrop = async (e) => {
     fileName = file.name;
     fileDiv.innerText = "Loaded: " + file.name;
 
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+    if (file.size === 0) {
+      out.textContent = "ERROR: PDF is empty (0 bytes)";
+      return;
+    }
+
+    const buffer = await file.arrayBuffer();
+
+    // 🔥 SAFE PDF LOAD
+    const pdf = await pdfjsLib.getDocument({
+      data: buffer,
+      disableWorker: true
+    }).promise;
 
     let text = "";
 
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-      text += content.items.map(i => i.str).join(" ");
+
+      text += content.items.map(item => item.str).join(" ");
+    }
+
+    if (!text) {
+      out.textContent = "⚠️ No readable text in PDF (likely scanned image)";
+      return;
     }
 
     const lower = text.toLowerCase();
 
-    // 🔥 REAL SHOP DETECTION
+    // 🔥 REAL DETECTION
     window.detected = {
 
-      // THREAD TYPES
       threads:
         (lower.match(/thread/g) || []).length +
         (lower.match(/acme/g) || []).length +
@@ -95,7 +112,6 @@ drop.ondrop = async (e) => {
       stub: lower.includes("stub"),
       box: lower.includes("box"),
 
-      // HOLES / FEATURES
       holes:
         (lower.match(/hole/g) || []).length +
         (lower.match(/drill/g) || []).length +
@@ -113,11 +129,11 @@ drop.ondrop = async (e) => {
     calculate();
 
   } catch (err) {
-    out.textContent = "Error reading PDF: " + err.message;
+    out.textContent = "PDF ERROR: " + err.message;
   }
 };
 
-// MAIN CALCULATION
+// CALCULATION
 function calculate(){
 
   if(!fileName) return;
@@ -139,7 +155,6 @@ function calculate(){
 
   const vol = volumeRemoved(od,id,len);
 
-  // 🔥 LATHE TIME (REALISTIC)
   let lathe = 0.3 + vol * 0.02;
 
   if(threads) lathe += threads * 0.08;
@@ -148,14 +163,11 @@ function calculate(){
   if(box) lathe += 0.4;
   if(tolerance) lathe += 0.3;
 
-  // 🔥 MILL TIME
   let mill = 0.5 + holes * 0.04;
   if(unthreaded) mill += 0.2;
 
-  // PROGRAM TIME
   const prog = 1.2;
 
-  // PRICE
   const price =
     lathe * LATHE_RATE +
     mill * MILL_RATE +
@@ -164,7 +176,6 @@ function calculate(){
 
   const total = price * qty;
 
-  // OUTPUT
   out.textContent =
     "File: " + fileName + "\n\n" +
 
@@ -172,9 +183,8 @@ function calculate(){
     "Threads: " + threads + "\n" +
     "ACME: " + (acme ? "YES" : "NO") + "\n" +
     "Stub: " + (stub ? "YES" : "NO") + "\n" +
-    "Box Thread: " + (box ? "YES" : "NO") + "\n" +
-    "Unthreaded: " + (unthreaded ? "YES" : "NO") + "\n" +
-    "Tolerance: " + (tolerance ? "YES" : "NO") + "\n\n" +
+    "Box: " + (box ? "YES" : "NO") + "\n" +
+    "Unthreaded: " + (unthreaded ? "YES" : "NO") + "\n\n" +
 
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
