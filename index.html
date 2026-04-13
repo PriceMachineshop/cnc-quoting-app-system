@@ -11,32 +11,84 @@
   📄 Drag & Drop PDF Here
 </div>
 
+<div id="file"></div>
+
 <br>
 
 Qty: <input id="qty" type="number" value="10"><br><br>
 
+Material:
+<select id="material">
+  <option value="aluminum">Aluminum</option>
+  <option value="steel">Steel</option>
+</select><br><br>
+
+OD: <input id="od" type="number" value="2">
+ID: <input id="id" type="number" value="0">
+Length: <input id="length" type="number" value="4"><br><br>
+
 <pre id="out"></pre>
 
 <script>
+const LATHE_RATE = 110;
+const MILL_RATE = 130;
+const PROGRAM_RATE = 120;
+
+const density = { aluminum: 0.0975, steel: 0.283 };
+
+let fileName = "";
+
+function weight(od,id,len,mat){
+  const ro=od/2, ri=id/2;
+  return (Math.PI*ro*ro*len - Math.PI*ri*ri*len)*density[mat];
+}
+
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
+const fileDiv = document.getElementById("file");
 
 drop.ondragover = e => e.preventDefault();
 
 drop.ondrop = (e) => {
   e.preventDefault();
   const file = e.dataTransfer.files[0];
+  fileName = file.name;
+  fileDiv.innerText = "Loaded: " + file.name;
+  calculate();
+};
 
-  const qty = document.getElementById("qty").value;
+function calculate(){
+  if(!fileName) return;
 
-  const price = 75;
+  const qty = +document.getElementById("qty").value;
+  const mat = document.getElementById("material").value;
+  const od = +document.getElementById("od").value;
+  const id = +document.getElementById("id").value;
+  const len = +document.getElementById("length").value;
+
+  const w = weight(od,id,len,mat);
+
+  const lathe = 0.5 + w*0.05;
+  const mill = 0.75;
+  const prog = 1;
+
+  const price = (lathe*LATHE_RATE + mill*MILL_RATE + (prog/qty)*PROGRAM_RATE) + w*2;
+  const total = price * qty;
 
   out.textContent =
-    "File: " + file.name +
-    "\\nQty: " + qty +
-    "\\nPrice/Part: $" + price;
-};
+    "File: " + fileName + "\\n" +
+    "Lathe Time: " + lathe.toFixed(2) + " hrs\\n" +
+    "Mill Time: " + mill.toFixed(2) + " hrs\\n" +
+    "Weight: " + w.toFixed(2) + " lbs\\n" +
+    "Price/Part: $" + price.toFixed(2) + "\\n" +
+    "Total: $" + total.toFixed(2);
+}
+
+document.querySelectorAll("input, select").forEach(el => el.oninput = calculate);
 </script>
+
+</body>
+</html>
 
 </body>
 </html>
