@@ -4,14 +4,17 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "build": "npx electron-builder --win portable"
+    "build": "electron-builder"
   },
   "devDependencies": {
     "electron": "^30.0.0",
     "electron-builder": "^24.0.0"
   },
-  "dependencies": {
-    "pdf-parse": "^1.1.1",
-    "sqlite3": "^5.1.0"
+  "build": {
+    "appId": "com.cnc.quote",
+    "productName": "CNC Quote System",
+    "win": {
+      "target": "portable"
+    }
   }
 }
