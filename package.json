@@ -1,22 +1,17 @@
 {
-  "name": "minimal-repro",
+  "name": "cnc-quote-app",
   "version": "1.0.0",
-  "description": "A minimal Electron application",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "build": "npx electron-builder --win portable"
   },
-  "repository": "https://github.com/electron/minimal-repro",
-  "keywords": [
-    "Electron",
-    "quick",
-    "start",
-    "tutorial",
-    "demo"
-  ],
-  "author": "GitHub",
-  "license": "CC0-1.0",
   "devDependencies": {
-    "electron": "^41.1.1"
+    "electron": "^30.0.0",
+    "electron-builder": "^24.0.0"
+  },
+  "dependencies": {
+    "pdf-parse": "^1.1.1",
+    "sqlite3": "^5.1.0"
   }
 }
