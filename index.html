@@ -58,15 +58,26 @@ const fileDiv = document.getElementById("file");
 
 drop.ondragover = e => e.preventDefault();
 
-drop.ondrop = (e) => {
+drop.ondrop = async (e) => {
   e.preventDefault();
   const file = e.dataTransfer.files[0];
- fileName = file.name;
-const features = detectFeatures(fileName);
-window.detected = features;
-};
+  fileName = file.name;
+  fileDiv.innerText = "Loaded: " + file.name;
 
-function calculate(){
+  const text = await file.text(); // basic read
+
+  const lower = text.toLowerCase();
+
+  window.detected = {
+    holes: (lower.match(/hole/g)||[]).length,
+    threads: (lower.match(/thread/g)||[]).length,
+    acme: lower.includes("acme"),
+    stub: lower.includes("stub"),
+    pitch: lower.includes("pitch")
+  };
+
+  calculate();
+};
   if(!fileName) return;
   
   const holes = window.detected?.holes || 0;
@@ -76,19 +87,37 @@ function calculate(){
   const od = +document.getElementById("od").value;
   const id = +document.getElementById("id").value;
   const len = +document.getElementById("length").value;
+  const holes = window.detected?.holes || 0;
+  const threads = window.detected?.threads || 0;
+  const acme = window.detected?.acme;
+  const stub = window.detected?.stub;
 
   const w = weight(od,id,len,mat);
 
-const lathe = 0.5 + w*0.05 + threads*0.04;
+let lathe = 0.5 + w*0.05 + threads*0.04;
+
+if(acme) lathe += 0.5;
+if(stub) lathe += 0.25;
 const mill = 0.75 + holes*0.02;
   const prog = 1;
 
-  const price = (lathe*LATHE_RATE + mill*MILL_RATE + (prog/qty)*PROGRAM_RATE) + w*2;
+ const matPrice = +document.getElementById("matPrice").value;
+const materialCost = w * matPrice;
+
+const price = (
+  lathe * LATHE_RATE +
+  mill * MILL_RATE +
+  (prog / qty) * PROGRAM_RATE +
+  materialCost
+);
   const total = price * qty;
 
   out.textContent =
     "File: " + fileName + "\\n" +
+    "Material Cost: $" + materialCost.toFixed(2) + "\\n" +
     "Lathe Time: " + lathe.toFixed(2) + " hrs\\n" +
+    "ACME Thread: " + (acme ? "YES" : "NO") + "\\n" +
+    "Stub Thread: " + (stub ? "YES" : "NO") + "\\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\\n" +
     "Holes: " + holes + "\\n" +
     "Threads: " + threads + "\\n" +
