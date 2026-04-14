@@ -78,8 +78,9 @@ drop.ondrop = async (e) => {
     text += content.items.map(i => i.str).join(" ");
   }
 
+  const lower = text.toLowerCase();
   const txt = lower;
-
+  
 // HELPERS
 function count(regex){
   return (txt.match(regex) || []).length;
