@@ -86,7 +86,8 @@ drop.ondrop = async (e) => {
   // ✅ DETECTION
   window.detected = {
     holes: count(/drill|hole|thru|through/g),
-    threads: count(/tap|thread|\d+-\d+/g),
+    threadSize: (lower.match(/\d+(\.\d+)?-\d+/g) || []).join(", "),
+    tpi: (lower.match(/\d+\s*tpi/g) || []).join(", "),
 
     slots: count(/slot|slt|mill|profile|cut/g),
     pockets: count(/pocket|cavity|remove|clear/g),
@@ -96,8 +97,8 @@ drop.ondrop = async (e) => {
     grooves: count(/groove|undercut/g),
     chamfers: count(/chamfer/g),
 
-    acme: lower.includes("acme"),
-    stub: lower.includes("stub"),
+    pin: /pin|external thread|od thread/.test(lower),
+    box: /box|internal thread|id thread/.test(lower),
 
     tightTol: lower.includes(".001"),
     veryTightTol: lower.includes(".0005"),
@@ -140,7 +141,10 @@ function calculate(){
 
   if(d.acme) lathe += 0.75;
   if(d.stub) lathe += 0.35;
-
+  if(d.pin) lathe += 0.25;   // external threading (pin)
+  if(d.box) lathe += 0.35;   // internal threading (box is slower)
+  if(d.acme && d.stub) lathe += 0.5;
+  
   lathe += d.grooves * 0.05;
   lathe += d.chamfers * 0.02;
 
@@ -171,7 +175,9 @@ function calculate(){
   prog += slots * 0.05;
   prog += pockets * 0.08;
 
-  if(d.acme) prog += 0.5;
+  if(d.acme) prog += 0.3;
+  if(d.stub) prog += 0.2;
+  if(d.box) prog += 0.2;
   if(d.multiOp) prog += 0.4;
 
   const price =
@@ -188,9 +194,13 @@ function calculate(){
 
     "Holes: " + holes + "\n" +
     "Threads: " + threads + "\n" +
+    "Pin (OD Thread): " + (d.pin ? "YES" : "NO") + "\n" +
+    "Box (ID Thread): " + (d.box ? "YES" : "NO") + "\n" +
+    "Thread Size: " + (d.threadSize || "N/A") + "\n" +
+    "TPI: " + (d.tpi || "N/A") + "\n\n" +
     "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
     "Stub: " + (d.stub ? "YES" : "NO") + "\n\n" +
-
+     
     "Slots: " + slots + "\n" +
     "Pockets: " + pockets + "\n" +
     "Keyways: " + keyways + "\n" +
