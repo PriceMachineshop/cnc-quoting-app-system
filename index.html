@@ -174,27 +174,34 @@ function calculate(ocrText){
   if(detected.box) lathe += 0.5;
   if(detected.tapped) lathe += 0.3;
 
-  let mill = 0.5 + detected.holes * 0.05;
+  let mill = 0.5 + (detected.holes || 0) * 0.05;
 
   const prog = 1.2;
 
   const price =
-    lathe * LATHE_RATE +
-    mill * MILL_RATE +
-    (prog / qty) * PROGRAM_RATE +
+    lathe * 120 +
+    mill * 120 +
+    (prog / qty) * 100 +
     matCost;
 
   const total = price * qty;
 
+  // 🔥 THIS IS THE IMPORTANT PART
   out.textContent =
     "File: " + fileName + "\n\n" +
+
     "Threads: " + detected.threads + "\n" +
     "Holes: " + detected.holes + "\n" +
     "ACME: " + (detected.acme ? "YES" : "NO") + "\n\n" +
-    "Lathe: " + lathe.toFixed(2) + " hrs\n" +
-    "Mill: " + mill.toFixed(2) + " hrs\n\n" +
+
+    "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
+    "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
+
     "Price/Part: $" + price.toFixed(2) + "\n" +
-    "Total: $" + total.toFixed(2);
+    "Total: $" + total.toFixed(2) + "\n\n" +
+
+    "------ OCR TEXT ------\n" +
+    (ocrText || "");
 }
 
 // UPDATE INPUTS
