@@ -26,7 +26,12 @@ document.getElementById("file").onchange = function(e){
 
   out.textContent = "Reading file...\n";
 
-  Tesseract.recognize(file, "eng").then(result => {
+  Tesseract.recognize(file, "eng", {
+  logger: m => {
+    document.getElementById("out").textContent =
+      "OCR Progress: " + Math.round((m.progress || 0)*100) + "%\n";
+  }
+}).then(result => {
 
     const text = result.data.text.toLowerCase();
 
