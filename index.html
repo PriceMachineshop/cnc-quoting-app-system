@@ -35,7 +35,50 @@ document.getElementById("fileInput").addEventListener("change", function(e){
 
   out.textContent = "Starting OCR...\n";
 
-  Tesseract.recognize(file, "eng", {
+ const out = document.getElementById("out");
+
+out.textContent = "Starting OCR...\n";
+
+Tesseract.recognize(file, "eng", {
+  workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/worker.min.js",
+  corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@4/tesseract-core.wasm.js",
+  logger: m => {
+    out.textContent = "OCR Progress: " + Math.round((m.progress || 0)*100) + "%";
+  }
+}).then(result => {
+
+  let text = "";
+
+  try {
+    text = result.data.text.toLowerCase();
+  } catch(e) {
+    out.textContent = "OCR failed to read text";
+    return;
+  }
+
+  let threads = (text.match(/thread|unc|unf|acme|stub|tap/g) || []).length;
+  let holes = (text.match(/drill|hole|bore/g) || []).length;
+
+  let qty = +document.getElementById("qty").value || 1;
+  let mat = +document.getElementById("mat").value || 0;
+  let od = +document.getElementById("od").value || 0;
+  let len = +document.getElementById("len").value || 0;
+
+  let lathe = 0.5 + (od * len * 0.05) + threads * 0.25;
+  let mill = 0.5 + holes * 0.15;
+
+  let price = lathe*120 + mill*120 + mat;
+  let total = price * qty;
+
+  out.textContent =
+    "Threads: " + threads + "\n" +
+    "Holes: " + holes + "\n\n" +
+    "Price/Part: $" + price.toFixed(2) + "\n" +
+    "Total: $" + total.toFixed(2);
+
+}).catch(err => {
+  out.textContent = "REAL ERROR: " + JSON.stringify(err);
+});
     logger: m => {
       out.textContent = "OCR Progress: " + Math.round((m.progress || 0)*100) + "%";
     }
