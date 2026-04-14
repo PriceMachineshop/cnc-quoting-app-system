@@ -12,26 +12,20 @@ Material Cost (per part $):
 
 OD:
 Stock OD:
+
 <input id="od" type="number" value="2">
 
 ID:
+Stock ID:
 Final ID:
 <input id="id" type="number" value="0">
 
 Length:
-<input id="length" type="number" value="4"><br><br>
-
-<pre id="out" style="border:1px solid #000;padding:10px;background:#f0f0f0;"></pre>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-
-<script>
-const LATHE_RATE = 110;
-const MILL_RATE = 130;
-const PROGRAM_RATE = 120;
+@@ -32,30 +32,31 @@
 
 let fileName = "";
 
+// MATERIAL REMOVAL
 // VOLUME (material removal)
 function volumeRemoved(od,id,len){
   const ro = od/2;
@@ -46,34 +40,43 @@ const fileDiv = document.getElementById("file");
 
 drop.ondragover = e => e.preventDefault();
 
+// ✅ SINGLE CLEAN DROP HANDLER
 drop.ondrop = (e) => {
 drop.ondrop = async (e) => {
   e.preventDefault();
 
   const file = e.dataTransfer.files[0];
+  if(!file) return;
+
 @@ -61,13 +64,28 @@ <h2>CNC Quote System</h2>
   fileName = file.name;
   fileDiv.innerText = "Loaded: " + file.name;
 
+  // READ PDF TEXT
   const lower = file.name.toLowerCase();
   // READ PDF TEXT USING pdf.js
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
 
-  let text = "";
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += content.items.map(i => i.str).join(" ");
-  }
+@@ -69,68 +70,88 @@
 
   const lower = text.toLowerCase();
 
+  // DETECTION
+  window.detected = {
+    holes: (lower.match(/hole|drill|bore/g) || []).length,
+    threads: (lower.match(/thread/g) || []).length,
+    acme: lower.includes("acme"),
+    stub: lower.includes("stub"),
+    pitch: lower.includes("pitch"),
+    tolerance: lower.includes("±") || lower.includes("tolerance")
+  };
 // 🔥 SMART DETECTION (AI-LIKE RULES)
 window.detected = {
   holes: (lower.match(/hole|drill|bore/g) || []).length,
 
+  calculate();
+};
   threads: (lower.match(/thread|unc|unf|acme/g) || []).length,
 
   acme: /acme/i.test(lower),
@@ -86,9 +89,12 @@ window.detected = {
 
   pitch: /pitch|\d+\s*tpi/i.test(lower),
 
+// CALCULATION
+function calculate(){
   tolerance: /±|tolerance|\.\d{3}/.test(lower)
 };
 
+  const holes = window.detected?.holes || 0;
   calculate();
 @@ -82,6 +100,7 @@ <h2>CNC Quote System</h2>
   const threads = window.detected?.threads || 0;
@@ -96,6 +102,13 @@ window.detected = {
   const stub = window.detected?.stub;
   const tolerance = window.detected?.tolerance;
 
+  const qty = +document.getElementById("qty").value || 1;
+  const matCost = +document.getElementById("matCost").value || 0;
+  const od = +document.getElementById("od").value || 0;
+  const id = +document.getElementById("id").value || 0;
+  const len = +document.getElementById("length").value || 0;
+
+  // MATERIAL REMOVAL DRIVES LATHE
   const qty = +document.getElementById("qty").value;
   const matCost = +document.getElementById("matCost").value;
 @@ -90,15 +109,24 @@ <h2>CNC Quote System</h2>
@@ -126,10 +139,15 @@ window.detected = {
   // PROGRAM TIME
   const prog = 1.2;
 
+  const price =
   // PRICE
   const price = (
     lathe * LATHE_RATE +
     mill * MILL_RATE +
+    prog * PROGRAM_RATE +
+    matCost;
+
+  const total = price * qty;
 @@ -110,32 +138,28 @@ <h2>CNC Quote System</h2>
 
   // OUTPUT
@@ -155,8 +173,7 @@ window.detected = {
     "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
 
     "Price/Part: $" + price.toFixed(2) + "\n" +
-    "Total: $" + total.toFixed(2);
-}
+@@ -139,13 +160,10 @@
 
 // AUTO UPDATE
 document.querySelectorAll("input, select").forEach(el => {
