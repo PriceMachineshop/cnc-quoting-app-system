@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>CNC Quote System</title>
+  <title>CNC Quote OCR System</title>
 </head>
 <body>
 
-<h2>CNC Quote System (OCR Debug)</h2>
+<h2>CNC Quote System (OCR Only - Stable)</h2>
 
-<div id="drop" style="border:3px dashed red;padding:30px;">
+<div id="drop" style="border:3px dashed green;padding:30px;">
   📄 DROP PDF HERE
 </div>
 
@@ -15,29 +15,11 @@
 
 <br>
 
-Qty:
-<input id="qty" type="number" value="10"><br><br>
-
-Material Cost:
-<input id="matCost" type="number" value="25"><br><br>
-
-OD:
-<input id="od" type="number" value="2">
-
-ID:
-<input id="id" type="number" value="0">
-
-Length:
-<input id="length" type="number" value="4"><br><br>
-
 <pre id="out"></pre>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
 
 <script>
-pdfjsLib.GlobalWorkerOptions.workerSrc = "";
-
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
 const fileDiv = document.getElementById("file");
@@ -51,8 +33,7 @@ drop.ondragleave = () => {
   drop.style.background = "";
 };
 
-// 🚀 MAIN DROP
-drop.ondrop = (e) => {
+drop.ondrop = async (e) => {
   e.preventDefault();
   drop.style.background = "";
 
@@ -61,64 +42,56 @@ drop.ondrop = (e) => {
   const file = e.dataTransfer.files[0];
 
   if (!file) {
-    out.textContent += "❌ No file found";
+    out.textContent += "❌ No file\n";
     return;
   }
 
   fileDiv.innerText = "Loaded: " + file.name;
 
-  out.textContent += "Reading file...\n";
+  try {
+    out.textContent += "Running OCR directly on file...\n";
 
-  const reader = new FileReader();
+    const result = await Tesseract.recognize(
+      file,
+      "eng",
+      {
+        logger: m => {
+          if (m.status === "recognizing text") {
+            out.textContent = "OCR Progress: " + Math.round(m.progress * 100) + "%";
+          }
+        }
+      }
+    );
 
-  reader.onload = async function () {
+    const text = result.data.text;
+    const lower = text.toLowerCase();
 
-    out.textContent += "File loaded into memory\n";
+    out.textContent = "\n--- OCR TEXT ---\n" + text;
 
-    try {
-      const data = new Uint8Array(this.result);
+    // 🔥 DETECTION
+    let threads = 0;
+    let holes = 0;
 
-      out.textContent += "Opening PDF...\n";
+    threads += (lower.match(/unc/g) || []).length;
+    threads += (lower.match(/unf/g) || []).length;
+    threads += (lower.match(/acme/g) || []).length;
+    threads += (lower.match(/stub/g) || []).length;
+    threads += (lower.match(/tap/g) || []).length;
 
-      const pdf = await pdfjsLib.getDocument({
-        data: data,
-        disableWorker: true
-      }).promise;
+    holes += (lower.match(/drill/g) || []).length;
+    holes += (lower.match(/bore/g) || []).length;
+    holes += (lower.match(/thru/g) || []).length;
 
-      out.textContent += "PDF opened\n";
+    out.textContent += "\n\n--- DETECTED ---\n";
+    out.textContent += "Threads: " + threads + "\n";
+    out.textContent += "Holes: " + holes + "\n";
+    out.textContent += "ACME: " + (lower.includes("acme") ? "YES" : "NO") + "\n";
+    out.textContent += "Stub: " + (lower.includes("stub") ? "YES" : "NO") + "\n";
+    out.textContent += "Box: " + (lower.includes("box") ? "YES" : "NO") + "\n";
 
-      const page = await pdf.getPage(1);
-
-      out.textContent += "Rendering page...\n";
-
-      const viewport = page.getViewport({ scale: 2 });
-
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      await page.render({
-        canvasContext: ctx,
-        viewport: viewport
-      }).promise;
-
-      out.textContent += "Running OCR...\n";
-
-      const result = await Tesseract.recognize(canvas, "eng");
-
-      const text = result.data.text;
-
-      out.textContent += "\n--- OCR RESULT ---\n";
-      out.textContent += text;
-
-    } catch (err) {
-      out.textContent += "\n❌ ERROR:\n" + err.message;
-    }
-  };
-
-  reader.readAsArrayBuffer(file);
+  } catch (err) {
+    out.textContent = "❌ ERROR:\n" + err.message;
+  }
 };
 </script>
 
