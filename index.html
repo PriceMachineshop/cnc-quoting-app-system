@@ -36,13 +36,13 @@ Length:
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <script>
-const LATHE_RATE = 110;
-const MILL_RATE = 130;
-const PROGRAM_RATE = 120;
+const LATHE_RATE = 120;
+const MILL_RATE = 120;
+const PROGRAM_RATE = 100;
 
 let fileName = "";
 
-// 🔧 FIX: disable worker (CRITICAL for Electron)
+// FIX for Electron
 pdfjsLib.GlobalWorkerOptions.workerSrc = "";
 
 // MATERIAL REMOVAL
@@ -58,7 +58,7 @@ const fileDiv = document.getElementById("file");
 
 drop.ondragover = e => e.preventDefault();
 
-// 🚀 FIXED DROP FUNCTION
+// 🔥 SAFE PDF READER
 drop.ondrop = async (e) => {
   e.preventDefault();
 
@@ -70,13 +70,12 @@ drop.ondrop = async (e) => {
     fileDiv.innerText = "Loaded: " + file.name;
 
     if (file.size === 0) {
-      out.textContent = "ERROR: PDF is empty (0 bytes)";
+      out.textContent = "ERROR: File is empty (0 bytes)";
       return;
     }
 
     const buffer = await file.arrayBuffer();
 
-    // 🔥 SAFE PDF LOAD
     const pdf = await pdfjsLib.getDocument({
       data: buffer,
       disableWorker: true
@@ -87,38 +86,45 @@ drop.ondrop = async (e) => {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const content = await page.getTextContent();
-
-      text += content.items.map(item => item.str).join(" ");
+      text += content.items.map(i => i.str).join(" ");
     }
 
-    if (!text) {
-      out.textContent = "⚠️ No readable text in PDF (likely scanned image)";
+    if (!text || text.trim().length < 5) {
+      out.textContent = "⚠️ No readable text (scanned PDF)";
       return;
     }
 
     const lower = text.toLowerCase();
 
-    // 🔥 REAL DETECTION
-    window.detected = {
+    // 🔥 SAFE DETECTION (NO REGEX CRASHES)
+    let threadCount = 0;
+    let holeCount = 0;
 
-      threads:
-        (lower.match(/thread/g) || []).length +
-        (lower.match(/acme/g) || []).length +
-        (lower.match(/stub/g) || []).length +
-        (lower.match(/unc/g) || []).length +
-        (lower.match(/unf/g) || []).length,
+    try {
+      threadCount += (lower.match(/unc/g) || []).length;
+      threadCount += (lower.match(/unf/g) || []).length;
+      threadCount += (lower.match(/acme/g) || []).length;
+      threadCount += (lower.match(/thread/g) || []).length;
+      threadCount += (lower.match(/tap/g) || []).length;
+
+      holeCount += (lower.match(/drill/g) || []).length;
+      holeCount += (lower.match(/bore/g) || []).length;
+      holeCount += (lower.match(/thru/g) || []).length;
+      holeCount += (lower.match(/diameter/g) || []).length;
+    } catch(e) {
+      console.log("Pattern error ignored");
+    }
+
+    window.detected = {
+      threads: threadCount,
+      holes: holeCount,
 
       acme: lower.includes("acme"),
       stub: lower.includes("stub"),
       box: lower.includes("box"),
 
-      holes:
-        (lower.match(/hole/g) || []).length +
-        (lower.match(/drill/g) || []).length +
-        (lower.match(/bore/g) || []).length +
-        (lower.match(/thru/g) || []).length,
-
-      unthreaded: lower.includes("unthreaded"),
+      tapped: lower.includes("tap"),
+      unthreaded: lower.includes("drill") || lower.includes("bore"),
 
       tolerance:
         lower.includes("±") ||
@@ -138,13 +144,7 @@ function calculate(){
 
   if(!fileName) return;
 
-  const holes = window.detected?.holes || 0;
-  const threads = window.detected?.threads || 0;
-  const acme = window.detected?.acme;
-  const stub = window.detected?.stub;
-  const box = window.detected?.box;
-  const tolerance = window.detected?.tolerance;
-  const unthreaded = window.detected?.unthreaded;
+  const d = window.detected || {};
 
   const qty = +document.getElementById("qty").value;
   const matCost = +document.getElementById("matCost").value;
@@ -157,14 +157,15 @@ function calculate(){
 
   let lathe = 0.3 + vol * 0.02;
 
-  if(threads) lathe += threads * 0.08;
-  if(acme) lathe += 1.0;
-  if(stub) lathe += 0.5;
-  if(box) lathe += 0.4;
-  if(tolerance) lathe += 0.3;
+  if(d.threads) lathe += d.threads * 0.08;
+  if(d.acme) lathe += 1.0;
+  if(d.stub) lathe += 0.5;
+  if(d.box) lathe += 0.4;
+  if(d.tapped) lathe += 0.3;
+  if(d.tolerance) lathe += 0.3;
 
-  let mill = 0.5 + holes * 0.04;
-  if(unthreaded) mill += 0.2;
+  let mill = 0.5 + (d.holes || 0) * 0.04;
+  if(d.unthreaded) mill += 0.2;
 
   const prog = 1.2;
 
@@ -179,12 +180,12 @@ function calculate(){
   out.textContent =
     "File: " + fileName + "\n\n" +
 
-    "Holes: " + holes + "\n" +
-    "Threads: " + threads + "\n" +
-    "ACME: " + (acme ? "YES" : "NO") + "\n" +
-    "Stub: " + (stub ? "YES" : "NO") + "\n" +
-    "Box: " + (box ? "YES" : "NO") + "\n" +
-    "Unthreaded: " + (unthreaded ? "YES" : "NO") + "\n\n" +
+    "Threads: " + (d.threads || 0) + "\n" +
+    "Holes: " + (d.holes || 0) + "\n" +
+    "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
+    "Stub: " + (d.stub ? "YES" : "NO") + "\n" +
+    "Box: " + (d.box ? "YES" : "NO") + "\n" +
+    "Tapped: " + (d.tapped ? "YES" : "NO") + "\n\n" +
 
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
@@ -200,6 +201,3 @@ document.querySelectorAll("input").forEach(el => {
   el.oninput = calculate;
 });
 </script>
-
-</body>
-</html>
