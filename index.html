@@ -1,11 +1,11 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>CNC Quote OCR System</title>
+  <title>Price Machine Quote OCR System</title>
 </head>
 <body>
 
-<h2>CNC Quote System (OCR + Pricing)</h2>
+<h2>Price Machine Quote System (OCR + Pricing)</h2>
 
 <div id="drop" style="border:3px dashed green;padding:30px;">
   📄 DROP PDF HERE
@@ -111,22 +111,19 @@ drop.ondrop = async (e) => {
         lower.includes(".00")
     };
 
-    calculate(text);
+  function calculate(ocrText){
 
-  } catch (err) {
-    out.textContent = "ERROR: " + err.message;
+  if(!detected || detected.threads === undefined){
+    out.textContent = "⚠️ Load a PDF first";
+    return;
   }
-};
 
-// CALCULATION
-function calculate(ocrText){
+  const qty = +document.getElementById("qty").value || 1;
+  const matCost = +document.getElementById("matCost").value || 0;
 
-  const qty = +document.getElementById("qty").value;
-  const matCost = +document.getElementById("matCost").value;
-
-  const od = +document.getElementById("od").value;
-  const id = +document.getElementById("id").value;
-  const len = +document.getElementById("length").value;
+  const od = +document.getElementById("od").value || 0;
+  const id = +document.getElementById("id").value || 0;
+  const len = +document.getElementById("length").value || 0;
 
   const vol = volumeRemoved(od,id,len);
 
@@ -139,7 +136,7 @@ function calculate(ocrText){
   if(detected.tapped) lathe += 0.3;
   if(detected.tolerance) lathe += 0.4;
 
-  let mill = 0.5 + detected.holes * 0.05;
+  let mill = 0.5 + (detected.holes || 0) * 0.05;
 
   const prog = 1.2;
 
@@ -151,7 +148,6 @@ function calculate(ocrText){
 
   const total = price * qty;
 
-  // OUTPUT
   out.textContent =
     "File: " + fileName + "\n\n" +
 
@@ -169,13 +165,16 @@ function calculate(ocrText){
     "PRICE PER PART: $" + price.toFixed(2) + "\n" +
     "TOTAL: $" + total.toFixed(2) + "\n\n" +
 
-    "------ OCR TEXT ------\n" +
-    ocrText;
+    (ocrText ? "------ OCR TEXT ------\n" + ocrText : "");
 }
 
 // AUTO UPDATE
 document.querySelectorAll("input").forEach(el => {
-  el.oninput = () => calculate("");
+  el.oninput = () => {
+  if(detected && detected.threads !== undefined){
+    calculate();
+  }
+};
 });
 </script>
 
