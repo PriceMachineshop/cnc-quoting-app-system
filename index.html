@@ -190,8 +190,15 @@ if(window.detected.veryTightTol) mill += 0.4;
 if(window.detected.multiOp) mill += 0.5;
 
   // PROGRAM
-  const prog = 1.2;
+ let prog = 0.8;
 
+// complexity adds programming
+prog += (window.detected.threads * 0.1);
+prog += (window.detected.slots * 0.05);
+prog += (window.detected.pockets * 0.08);
+
+if(window.detected.acme) prog += 0.5;
+if(window.detected.multiOp) prog += 0.4;
   // PRICE
   const price = (
     lathe * LATHE_RATE +
@@ -218,6 +225,10 @@ if(window.detected.multiOp) mill += 0.5;
     "Flats: " + flats + "\n\n" +
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
+    "Slots: " + window.detected.slots + "\n" +
+    "Pockets: " + window.detected.pockets + "\n" +
+    "Keyways: " + window.detected.keyways + "\n" +
+    "Grooves: " + window.detected.grooves + "\n\n" +
 
     "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
 
