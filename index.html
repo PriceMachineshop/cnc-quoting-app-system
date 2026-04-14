@@ -41,8 +41,17 @@ document.getElementById("fileInput").addEventListener("change", function(e){
     }
   }).then(result => {
 
-    const text = result.data.text.toLowerCase();
+   let text = "";
 
+if(result && result.data && result.data.text){
+  text = result.data.text.toLowerCase();
+} else {
+  text = "";
+}
+if(!text){
+  out.textContent = "No readable text found in PDF";
+  return;
+}
     // 🔍 DETECTION
     let threads = 0;
     let holes = 0;
