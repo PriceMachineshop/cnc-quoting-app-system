@@ -56,7 +56,7 @@ const fileDiv = document.getElementById("file");
 // DRAG
 drop.ondragover = e => e.preventDefault();
 
-// DROP (FIXED)
+// DROP
 drop.ondrop = async (e) => {
   e.preventDefault();
 
@@ -66,7 +66,6 @@ drop.ondrop = async (e) => {
   fileName = file.name;
   fileDiv.innerText = "Loaded: " + file.name;
 
-  // READ PDF
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
 
@@ -79,45 +78,36 @@ drop.ondrop = async (e) => {
   }
 
   const lower = text.toLowerCase();
-  const txt = lower;
-  
-// HELPERS
-function count(regex){
-  return (txt.match(regex) || []).length;
-}
 
-window.detected = {
-  const millingOps = count(/mill|profile|slot|pocket|cut|face/g);
+  function count(regex){
+    return (lower.match(regex) || []).length;
+  }
 
-  // HOLES (drilled or tapped)
-  holes: count(/drill|hole|thru|through/g),
+  // ✅ DETECTION
+  window.detected = {
+    holes: count(/drill|hole|thru|through/g),
+    threads: count(/tap|thread|\d+-\d+/g),
 
-  // THREADS (tap / thread callouts)
-  threads: count(/tap|thread|\d+-\d+/g),
+    slots: count(/slot|slt|mill|profile|cut/g),
+    pockets: count(/pocket|cavity|remove|clear/g),
+    keyways: count(/keyway|key seat|key/g),
+    flats: count(/flat/g),
 
-  // MILL FEATURES
-  slots: count(/slot|slt|mill|profile|cut/g),
-  pockets: count(/pocket|cavity|remove|clear/g),
-  keyways: count(/keyway|key seat|key/g),
-  flats: count(/flat/g),
+    grooves: count(/groove|undercut/g),
+    chamfers: count(/chamfer/g),
 
-  // TURNING FEATURES
-  grooves: count(/groove|undercut/g),
-  chamfers: count(/chamfer/g),
+    acme: lower.includes("acme"),
+    stub: lower.includes("stub"),
 
-  // THREAD TYPES
-  acme: txt.includes("acme"),
-  stub: txt.includes("stub"),
-  pitch: txt.includes("pitch"),
+    tightTol: lower.includes(".001"),
+    veryTightTol: lower.includes(".0005"),
 
-  // COMPLEXITY FLAGS
-  tightTol: txt.includes("±.001") || txt.includes(".001") || txt.includes("tight"),
-  veryTightTol: txt.includes("±.0005") || txt.includes(".0005"),
+    deepFeatures: lower.includes("deep"),
+    multiOp: lower.includes("flip") || lower.includes("2nd op")
+  };
 
-  // DEPTH / MULTI-OP CLUES
-  deepFeatures: txt.includes("deep"),
-  multiOp: txt.includes("flip") || txt.includes("2nd op")
-};
+  // ✅ GLOBAL MILLING DETECTION
+  window.millingOps = count(/mill|profile|slot|pocket|cut|face/g);
 
   calculate();
 };
@@ -127,11 +117,14 @@ function calculate(){
 
   if(!fileName) return;
 
-  const holes = window.detected?.holes || 0;
-  const threads = window.detected?.threads || 0;
-  const acme = window.detected?.acme;
-  const stub = window.detected?.stub;
-  const tolerance = window.detected?.tolerance;
+  const d = window.detected;
+
+  const holes = d.holes || 0;
+  const threads = d.threads || 0;
+  const slots = d.slots || 0;
+  const pockets = d.pockets || 0;
+  const keyways = d.keyways || 0;
+  const flats = d.flats || 0;
 
   const qty = +document.getElementById("qty").value;
   const matCost = +document.getElementById("matCost").value;
@@ -142,96 +135,70 @@ function calculate(){
 
   // LATHE
   let lathe = 0.25;
+  lathe += volumeRemoved(od,id,len) * 0.02;
+  lathe += threads * 0.08;
 
-// material removal drives base time
-lathe += volumeRemoved(od,id,len) * 0.02;
+  if(d.acme) lathe += 0.75;
+  if(d.stub) lathe += 0.35;
 
-// threads
-lathe += window.detected.threads * 0.08;
+  lathe += d.grooves * 0.05;
+  lathe += d.chamfers * 0.02;
 
-// acme / stub threads are expensive
-if(window.detected.acme) lathe += 0.75;
-if(window.detected.stub) lathe += 0.35;
+  if(d.tightTol) lathe += 0.25;
+  if(d.veryTightTol) lathe += 0.5;
+  if(d.multiOp) lathe += 0.4;
 
-// grooves & chamfers
-lathe += window.detected.grooves * 0.05;
-lathe += window.detected.chamfers * 0.02;
+  // MILL
+  let mill = 0.4;
 
-// tolerance impact
-if(window.detected.tightTol) lathe += 0.25;
-if(window.detected.veryTightTol) lathe += 0.5;
+  mill += holes * 0.04;
+  mill += slots * 0.12;
+  mill += pockets * 0.15;
+  mill += keyways * 0.08;
+  mill += flats * 0.05;
 
-// multi-op penalty
-if(window.detected.multiOp) lathe += 0.4;
+  // 🔥 THIS FIXES YOUR ISSUE
+  mill += (window.millingOps || 0) * 0.15;
 
-  // 🔥 FIXED MILL (THIS WAS YOUR PROBLEM)
-  const slots = window.detected?.slots || 0;
-const pockets = window.detected?.pockets || 0;
-const keyways = window.detected?.keyways || 0;
-const flats = window.detected?.flats || 0;
-
-// MILL TIME
-let mill = 0.4;
-
-// base features
-mill += holes * 0.04;
-mill += slots * 0.12;
-mill += pockets * 0.15;
-mill += keyways * 0.08;
-mill += flats * 0.05;
-mill += millingOps * 0.15;
-
-// complexity bump
-if(window.detected.deepFeatures) mill += 0.3;
-
-// tolerance impact
-if(window.detected.tightTol) mill += 0.2;
-if(window.detected.veryTightTol) mill += 0.4;
-
-// multi-op setups
-if(window.detected.multiOp) mill += 0.5;
+  if(d.deepFeatures) mill += 0.3;
+  if(d.tightTol) mill += 0.2;
+  if(d.veryTightTol) mill += 0.4;
+  if(d.multiOp) mill += 0.5;
 
   // PROGRAM
- let prog = 0.8;
+  let prog = 0.8;
+  prog += threads * 0.1;
+  prog += slots * 0.05;
+  prog += pockets * 0.08;
 
-// complexity adds programming
-prog += (window.detected.threads * 0.1);
-prog += (window.detected.slots * 0.05);
-prog += (window.detected.pockets * 0.08);
+  if(d.acme) prog += 0.5;
+  if(d.multiOp) prog += 0.4;
 
-if(window.detected.acme) prog += 0.5;
-if(window.detected.multiOp) prog += 0.4;
-  // PRICE
-  const price = (
+  const price =
     lathe * LATHE_RATE +
     mill * MILL_RATE +
     (prog / qty) * PROGRAM_RATE +
-    matCost
-  );
+    matCost;
 
   const total = price * qty;
 
   // OUTPUT
   out.textContent =
     "File: " + fileName + "\n\n" +
-    
+
     "Holes: " + holes + "\n" +
     "Threads: " + threads + "\n" +
-    "Tapped: " + tapped + "\n" +
-    "ACME: " + (acme ? "YES" : "NO") + "\n" +
-    "Stub: " + (stub ? "YES" : "NO") + "\n" +
-    "Tolerance: " + (tolerance ? "YES" : "NO") + "\n\n" +
+    "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
+    "Stub: " + (d.stub ? "YES" : "NO") + "\n\n" +
+
     "Slots: " + slots + "\n" +
     "Pockets: " + pockets + "\n" +
     "Keyways: " + keyways + "\n" +
-    "Flats: " + flats + "\n\n" +
-    "Milling Ops: " + millingOps + "\n\n" +
+    "Flats: " + flats + "\n" +
+    "Milling Ops: " + (window.millingOps || 0) + "\n\n" +
+
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
-    "Slots: " + window.detected.slots + "\n" +
-    "Pockets: " + window.detected.pockets + "\n" +
-    "Keyways: " + window.detected.keyways + "\n" +
-    "Grooves: " + window.detected.grooves + "\n\n" +
 
     "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
 
