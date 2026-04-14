@@ -69,10 +69,8 @@ drop.ondrop = async (e) => {
     fileName = file.name;
     fileDiv.innerText = "Loaded: " + file.name;
 
-    if (file.size === 0) {
-      out.textContent = "ERROR: File is empty (0 bytes)";
-      return;
-    }
+   // Electron sometimes reports 0 size incorrectly
+console.log("File size:", file.size);
 
     const buffer = await file.arrayBuffer();
 
