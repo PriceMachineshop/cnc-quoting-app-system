@@ -43,7 +43,12 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = "";
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
 const fileDiv = document.getElementById("file");
-
+fileInput.onchange = (e) => {
+  const file = e.target.files[0];
+  if (file) {
+    handleFile(file);
+  }
+};
 let detected = {};
 let fileName = "";
 
