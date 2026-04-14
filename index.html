@@ -23,10 +23,8 @@ Material Cost (per part $):
 
 OD:
 <input id="od" type="number" value="2">
-
 ID:
 <input id="id" type="number" value="0">
-
 Length:
 <input id="length" type="number" value="4"><br><br>
 
@@ -83,15 +81,15 @@ drop.ondrop = async (e) => {
     return (lower.match(regex) || []).length;
   }
 
-  // ✅ DETECTION (FIXED + STRONGER)
+  // 🔥 STRONG THREAD REGEX (handles real prints)
+  const threadRegex = /[ø]?\s*\d*\.?\d+\s*-\s*\d+\s*(unc|unf|un)?-?\d*[ab]?/g;
+
   window.detected = {
 
     holes: count(/drill|hole|thru|through/g),
 
-    // 🔥 FIXED UN THREAD DETECTION
-    threads: count(/tap|thread|\d+(\.\d+)?-\d+\s*(unc|unf|un|tpi)?/g),
-
-    threadSize: (lower.match(/\d+(\.\d+)?-\d+\s*(unc|unf|un)?/g) || []).join(", "),
+    threads: (lower.match(threadRegex) || []).length,
+    threadSize: (lower.match(threadRegex) || []).join(", "),
     tpi: (lower.match(/\d+\s*tpi/g) || []).join(", "),
 
     slots: count(/slot|slt|mill|profile|cut/g),
@@ -105,7 +103,6 @@ drop.ondrop = async (e) => {
     acme: lower.includes("acme"),
     stub: lower.includes("stub"),
 
-    // 🔥 BETTER PIN / BOX DETECTION
     pin: /pin|external|od thread/.test(lower),
     box: /box|internal|id thread|tap|unc|unf/.test(lower),
 
@@ -116,7 +113,6 @@ drop.ondrop = async (e) => {
     multiOp: lower.includes("flip") || lower.includes("2nd op")
   };
 
-  // GLOBAL MILL DETECTION
   window.millingOps = count(/mill|profile|slot|pocket|cut|face/g);
 
   calculate();
@@ -192,11 +188,14 @@ function calculate(){
   if(d.box) prog += 0.2;
   if(d.multiOp) prog += 0.4;
 
+  // 🔥 MATERIAL MARKUP
+  const materialWithMarkup = matCost * 1.25;
+
   const price =
     lathe * LATHE_RATE +
     mill * MILL_RATE +
     (prog / qty) * PROGRAM_RATE +
-    matCost;
+    materialWithMarkup;
 
   const total = price * qty;
 
@@ -223,7 +222,8 @@ function calculate(){
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
 
-    "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
+    "Material Cost (Base): $" + matCost.toFixed(2) + "\n" +
+    "Material w/Markup (1.25x): $" + materialWithMarkup.toFixed(2) + "\n\n" +
 
     "Price/Part: $" + price.toFixed(2) + "\n" +
     "Total: $" + total.toFixed(2);
