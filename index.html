@@ -18,167 +18,132 @@
 Qty:
 <input id="qty" type="number" value="10"><br><br>
 
-Material:
-<select id="material">
-  <option value="aluminum">Aluminum</option>
-  <option value="steel">Steel</option>
-</select><br><br>
-
 Material Cost (per part $):
 <input id="matCost" type="number" value="25"><br><br>
 
 OD:
-Stock OD:
-
-input id="od" type="number" value="2">
+<input id="od" type="number" value="2">
 
 ID:
-Stock ID:
-Final ID:
 <input id="id" type="number" value="0">
 
 Length:
-@@ -32,30 +32,31 @@
+<input id="length" type="number" value="4"><br><br>
+
+<pre id="out" style="border:1px solid #000;padding:10px;background:#f0f0f0;"></pre>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+const LATHE_RATE = 110;
+const MILL_RATE = 130;
+const PROGRAM_RATE = 120;
 
 let fileName = "";
 
-// MATERIAL REMOVAL
-// VOLUME (material removal)
+// VOLUME
 function volumeRemoved(od,id,len){
   const ro = od/2;
   const ri = id/2;
   return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
 }
 
-// DRAG & DROP
+// ELEMENTS
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
 const fileDiv = document.getElementById("file");
 
+// DRAG
 drop.ondragover = e => e.preventDefault();
 
-// ✅ SINGLE CLEAN DROP HANDLER
-drop.ondrop = (e) => {
+// DROP (FIXED)
 drop.ondrop = async (e) => {
   e.preventDefault();
 
   const file = e.dataTransfer.files[0];
-  if(!file) return;
+  if (!file) return;
 
-@@ -61,13 +64,28 @@ <h2>CNC Quote System</h2>
   fileName = file.name;
   fileDiv.innerText = "Loaded: " + file.name;
 
-  // READ PDF TEXT
-  const lower = file.name.toLowerCase();
-  // READ PDF TEXT USING pdf.js
+  // READ PDF
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
 
-@@ -69,68 +70,88 @@
+  let text = "";
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    text += content.items.map(i => i.str).join(" ");
+  }
 
   const lower = text.toLowerCase();
 
-  // DETECTION
+  // 🔥 FIXED DETECTION
   window.detected = {
-    holes: (lower.match(/hole|drill|bore/g) || []).length,
+    holes: (lower.match(/hole|drill|bore|tap|thru|cbore|csink|spotface/g) || []).length,
     threads: (lower.match(/thread/g) || []).length,
+    tapped: (lower.match(/tap|tapped/g) || []).length,
     acme: lower.includes("acme"),
     stub: lower.includes("stub"),
-    pitch: lower.includes("pitch"),
     tolerance: lower.includes("±") || lower.includes("tolerance")
   };
-// 🔥 SMART DETECTION (AI-LIKE RULES)
-window.detected = {
-  holes: (lower.match(/hole|drill|bore/g) || []).length,
 
   calculate();
 };
-  threads: (lower.match(/thread|unc|unf|acme/g) || []).length,
 
-  acme: /acme/i.test(lower),
-
-  stub: /stub\s*acme|acme\s*stub|stub/i.test(lower),
-
-  // 🔥 NEW
-  internal: /internal|id thread|box/i.test(lower),
-  external: /external|od thread|pin/i.test(lower),
-
-  pitch: /pitch|\d+\s*tpi/i.test(lower),
-
-// CALCULATION
+// CALC
 function calculate(){
-  tolerance: /±|tolerance|\.\d{3}/.test(lower)
-};
+
+  if(!fileName) return;
 
   const holes = window.detected?.holes || 0;
-  calculate();
-@@ -82,6 +100,7 @@ <h2>CNC Quote System</h2>
   const threads = window.detected?.threads || 0;
+  const tapped = window.detected?.tapped || 0;
   const acme = window.detected?.acme;
   const stub = window.detected?.stub;
   const tolerance = window.detected?.tolerance;
 
-  const qty = +document.getElementById("qty").value || 1;
-  const matCost = +document.getElementById("matCost").value || 0;
-  const od = +document.getElementById("od").value || 0;
-  const id = +document.getElementById("id").value || 0;
-  const len = +document.getElementById("length").value || 0;
-
-  // MATERIAL REMOVAL DRIVES LATHE
   const qty = +document.getElementById("qty").value;
   const matCost = +document.getElementById("matCost").value;
-@@ -90,15 +109,24 @@ <h2>CNC Quote System</h2>
+
+  const od = +document.getElementById("od").value;
   const id = +document.getElementById("id").value;
   const len = +document.getElementById("length").value;
 
-  // TIME
-  let lathe = 0.5 + threads * 0.04;
-  if(acme) lathe += 0.5;
-  if(stub) lathe += 0.25;
-  // MATERIAL REMOVAL (drives lathe time)
+  // LATHE
   const vol = volumeRemoved(od,id,len);
-
-  const mill = 0.75 + holes * 0.02;
-  const prog = 1;
-  // LATHE TIME (based on material removed)
   let lathe = 0.3 + vol * 0.02;
 
-  // PRICE PER PART
   if(threads) lathe += threads * 0.05;
   if(acme) lathe += 0.75;
   if(stub) lathe += 0.35;
   if(tolerance) lathe += 0.25;
 
-  // MILL TIME
-  let mill = 0.5 + holes * 0.03;
+  // 🔥 FIXED MILL (THIS WAS YOUR PROBLEM)
+  let mill = 0.75 + holes * 0.05 + tapped * 0.15;
 
-  // PROGRAM TIME
+  // PROGRAM
   const prog = 1.2;
 
-  const price =
   // PRICE
   const price = (
     lathe * LATHE_RATE +
     mill * MILL_RATE +
-    prog * PROGRAM_RATE +
-    matCost;
+    (prog / qty) * PROGRAM_RATE +
+    matCost
+  );
 
   const total = price * qty;
-@@ -110,32 +138,28 @@ <h2>CNC Quote System</h2>
 
   // OUTPUT
   out.textContent =
-    "File: " + fileName + "\n" +
-    "Qty: " + qty + "\n\n" +
     "File: " + fileName + "\n\n" +
 
     "Holes: " + holes + "\n" +
     "Threads: " + threads + "\n" +
-    "ACME Thread: " + (acme ? "YES" : "NO") + "\n" +
-    "Internal Thread: " + (window.detected.internal ? "YES" : "NO") + "\n" +
-    "External Thread: " + (window.detected.external ? "YES" : "NO") + "\n\n" +
-    "Stub Thread: " + (stub ? "YES" : "NO") + "\n\n" +
+    "Tapped: " + tapped + "\n" +
     "ACME: " + (acme ? "YES" : "NO") + "\n" +
     "Stub: " + (stub ? "YES" : "NO") + "\n" +
     "Tolerance: " + (tolerance ? "YES" : "NO") + "\n\n" +
@@ -186,14 +151,13 @@ function calculate(){
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
 
-    "Material Cost (per part): $" + matCost.toFixed(2) + "\n\n" +
     "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
 
     "Price/Part: $" + price.toFixed(2) + "\n" +
-@@ -139,13 +160,10 @@
+    "Total: $" + total.toFixed(2);
+}
 
 // AUTO UPDATE
-document.querySelectorAll("input, select").forEach(el => {
 document.querySelectorAll("input").forEach(el => {
   el.oninput = calculate;
 });
