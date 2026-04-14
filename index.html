@@ -1,20 +1,29 @@
 <!DOCTYPE html>
 <html>
+<head>
+  <title>CNC Quote System</title>
+</head>
+
 <body>
 
-<h2>CNC Quote System</h2>
+<h2>CNC Quote System (STABLE)</h2>
 
-<input type="file" id="file"><br><br>
+<input type="file" id="fileInput"><br><br>
 
 Qty: <input id="qty" value="10"><br>
 Material ($/part): <input id="mat" value="25"><br><br>
+
+OD: <input id="od" value="2">
+ID: <input id="id" value="0">
+Length: <input id="len" value="4"><br><br>
 
 <pre id="out"></pre>
 
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
 
 <script>
-document.getElementById("file").onchange = function(e){
+
+document.getElementById("fileInput").addEventListener("change", function(e){
 
   const file = e.target.files[0];
   const out = document.getElementById("out");
@@ -24,39 +33,82 @@ document.getElementById("file").onchange = function(e){
     return;
   }
 
-  out.textContent = "Reading file...\n";
+  out.textContent = "Starting OCR...\n";
 
   Tesseract.recognize(file, "eng", {
-  logger: m => {
-    document.getElementById("out").textContent =
-      "OCR Progress: " + Math.round((m.progress || 0)*100) + "%\n";
-  }
-}).then(result => {
+    logger: m => {
+      out.textContent = "OCR Progress: " + Math.round((m.progress || 0)*100) + "%";
+    }
+  }).then(result => {
 
     const text = result.data.text.toLowerCase();
 
-    let threads = (text.match(/thread|unc|unf|acme/g) || []).length;
-    let holes = (text.match(/drill|hole|bore/g) || []).length;
+    // 🔍 DETECTION
+    let threads = 0;
+    let holes = 0;
 
-    let qty = +document.getElementById("qty").value;
-    let mat = +document.getElementById("mat").value;
+    threads += (text.match(/thread/g) || []).length;
+    threads += (text.match(/unc/g) || []).length;
+    threads += (text.match(/unf/g) || []).length;
+    threads += (text.match(/acme/g) || []).length;
+    threads += (text.match(/stub/g) || []).length;
+    threads += (text.match(/tap/g) || []).length;
 
-    let lathe = 0.5 + threads * 0.2;
-    let mill = 0.5 + holes * 0.1;
+    holes += (text.match(/drill/g) || []).length;
+    holes += (text.match(/hole/g) || []).length;
+    holes += (text.match(/bore/g) || []).length;
 
-    let price = lathe*120 + mill*120 + mat;
+    const detected = {
+      acme: text.includes("acme"),
+      stub: text.includes("stub"),
+      box: text.includes("box"),
+      tapped: text.includes("tap")
+    };
+
+    // 📊 INPUTS
+    let qty = +document.getElementById("qty").value || 1;
+    let mat = +document.getElementById("mat").value || 0;
+    let od = +document.getElementById("od").value || 0;
+    let id = +document.getElementById("id").value || 0;
+    let len = +document.getElementById("len").value || 0;
+
+    // ⚙️ MACHINING TIME
+    let lathe = 0.5 + (od * len * 0.05) + threads * 0.25;
+    let mill = 0.5 + holes * 0.15;
+
+    // 💰 PRICING
+    let price =
+      lathe * 120 +
+      mill * 120 +
+      mat;
+
     let total = price * qty;
 
+    // 🖥 OUTPUT
     out.textContent =
+      "THREAD DETECTION:\n" +
       "Threads: " + threads + "\n" +
-      "Holes: " + holes + "\n\n" +
-      "Price: $" + price.toFixed(2) + "\n" +
-      "Total: $" + total.toFixed(2) + "\n\n" +
-      "----- TEXT -----\n" + text;
+      "ACME: " + detected.acme + "\n" +
+      "STUB: " + detected.stub + "\n" +
+      "BOX: " + detected.box + "\n" +
+      "TAPPED: " + detected.tapped + "\n\n" +
 
+      "HOLES: " + holes + "\n\n" +
+
+      "LATHE TIME: " + lathe.toFixed(2) + " hrs\n" +
+      "MILL TIME: " + mill.toFixed(2) + " hrs\n\n" +
+
+      "PRICE / PART: $" + price.toFixed(2) + "\n" +
+      "TOTAL: $" + total.toFixed(2) + "\n\n" +
+
+      "----- OCR TEXT -----\n" + text;
+
+  }).catch(err => {
+    out.textContent = "ERROR: " + err.message;
   });
 
-}
+});
+
 </script>
 
 </body>
