@@ -59,7 +59,86 @@ const fileDiv = document.getElementById("file");
 drop.ondragover = e => e.preventDefault();
 
 // 🚀 MAIN DROP FUNCTION WITH OCR
-drop.ondrop = async (e) => {
+drop.ondrop = (e) => {
+  e.preventDefault();
+
+  const file = e.dataTransfer.files[0];
+  if (!file) return;
+
+  fileName = file.name;
+  fileDiv.innerText = "Loaded: " + file.name;
+
+  out.textContent = "Reading PDF...";
+
+  const reader = new FileReader();
+
+  reader.onload = async function () {
+    try {
+      const typedarray = new Uint8Array(this.result);
+
+      const pdf = await pdfjsLib.getDocument({
+        data: typedarray,
+        disableWorker: true
+      }).promise;
+
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 2 });
+
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
+
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      await page.render({
+        canvasContext: ctx,
+        viewport: viewport
+      }).promise;
+
+      out.textContent = "Running OCR...";
+
+      const result = await Tesseract.recognize(
+        canvas,
+        'eng',
+        { logger: m => console.log(m) }
+      );
+
+      const text = result.data.text;
+      const lower = text.toLowerCase();
+
+      console.log("OCR TEXT:", text);
+
+      let threadCount = 0;
+      let holeCount = 0;
+
+      threadCount += (lower.match(/unc/g) || []).length;
+      threadCount += (lower.match(/unf/g) || []).length;
+      threadCount += (lower.match(/acme/g) || []).length;
+      threadCount += (lower.match(/stub/g) || []).length;
+      threadCount += (lower.match(/tap/g) || []).length;
+
+      holeCount += (lower.match(/drill/g) || []).length;
+      holeCount += (lower.match(/bore/g) || []).length;
+      holeCount += (lower.match(/thru/g) || []).length;
+
+      window.detected = {
+        threads: threadCount,
+        holes: holeCount,
+        acme: lower.includes("acme"),
+        stub: lower.includes("stub"),
+        box: lower.includes("box"),
+        tapped: lower.includes("tap")
+      };
+
+      calculate();
+
+    } catch (err) {
+      out.textContent = "PDF ERROR: " + err.message;
+    }
+  };
+
+  reader.readAsArrayBuffer(file);
+};
   e.preventDefault();
 
   try {
