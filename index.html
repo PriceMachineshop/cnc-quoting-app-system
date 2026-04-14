@@ -78,23 +78,43 @@ drop.ondrop = async (e) => {
     text += content.items.map(i => i.str).join(" ");
   }
 
-  const lower = text.toLowerCase();
+  const txt = lower;
 
-  // 🔥 FIXED DETECTION
- window.detected = {
-  holes: (lower.match(/hole/g) || []).length,
-  threads: (lower.match(/thread/g) || []).length,
+// HELPERS
+function count(regex){
+  return (txt.match(regex) || []).length;
+}
 
-  // NEW — MILL FEATURES
-  slots: (lower.match(/slot/g) || []).length,
-  pockets: (lower.match(/pocket/g) || []).length,
-  keyways: (lower.match(/keyway/g) || []).length,
-  flats: (lower.match(/flat/g) || []).length,
+window.detected = {
 
-  acme: lower.includes("acme"),
-  stub: lower.includes("stub"),
-  pitch: lower.includes("pitch"),
-  tolerance: lower.includes("±") || lower.includes("tolerance")
+  // HOLES (drilled or tapped)
+  holes: count(/drill|hole|thru|through/g),
+
+  // THREADS (tap / thread callouts)
+  threads: count(/tap|thread|\d+-\d+/g),
+
+  // MILL FEATURES
+  slots: count(/slot|slt/g),
+  pockets: count(/pocket|cavity/g),
+  keyways: count(/keyway|key seat/g),
+  flats: count(/flat/g),
+
+  // TURNING FEATURES
+  grooves: count(/groove|undercut/g),
+  chamfers: count(/chamfer/g),
+
+  // THREAD TYPES
+  acme: txt.includes("acme"),
+  stub: txt.includes("stub"),
+  pitch: txt.includes("pitch"),
+
+  // COMPLEXITY FLAGS
+  tightTol: txt.includes("±.001") || txt.includes(".001") || txt.includes("tight"),
+  veryTightTol: txt.includes("±.0005") || txt.includes(".0005"),
+
+  // DEPTH / MULTI-OP CLUES
+  deepFeatures: txt.includes("deep"),
+  multiOp: txt.includes("flip") || txt.includes("2nd op")
 };
 
   calculate();
@@ -120,13 +140,28 @@ function calculate(){
   const len = +document.getElementById("length").value;
 
   // LATHE
-  const vol = volumeRemoved(od,id,len);
-  let lathe = 0.3 + vol * 0.02;
+  let lathe = 0.25;
 
-  if(threads) lathe += threads * 0.05;
-  if(acme) lathe += 0.75;
-  if(stub) lathe += 0.35;
-  if(tolerance) lathe += 0.25;
+// material removal drives base time
+lathe += volumeRemoved(od,id,len) * 0.02;
+
+// threads
+lathe += window.detected.threads * 0.08;
+
+// acme / stub threads are expensive
+if(window.detected.acme) lathe += 0.75;
+if(window.detected.stub) lathe += 0.35;
+
+// grooves & chamfers
+lathe += window.detected.grooves * 0.05;
+lathe += window.detected.chamfers * 0.02;
+
+// tolerance impact
+if(window.detected.tightTol) lathe += 0.25;
+if(window.detected.veryTightTol) lathe += 0.5;
+
+// multi-op penalty
+if(window.detected.multiOp) lathe += 0.4;
 
   // 🔥 FIXED MILL (THIS WAS YOUR PROBLEM)
   const slots = window.detected?.slots || 0;
@@ -135,12 +170,24 @@ const keyways = window.detected?.keyways || 0;
 const flats = window.detected?.flats || 0;
 
 // MILL TIME
-let mill = 0.5
-  + holes * 0.03
-  + slots * 0.08
-  + pockets * 0.10
-  + keyways * 0.06
-  + flats * 0.04;
+let mill = 0.4;
+
+// base features
+mill += window.detected.holes * 0.04;
+mill += window.detected.slots * 0.12;
+mill += window.detected.pockets * 0.15;
+mill += window.detected.keyways * 0.08;
+mill += window.detected.flats * 0.05;
+
+// complexity bump
+if(window.detected.deepFeatures) mill += 0.3;
+
+// tolerance impact
+if(window.detected.tightTol) mill += 0.2;
+if(window.detected.veryTightTol) mill += 0.4;
+
+// multi-op setups
+if(window.detected.multiOp) mill += 0.5;
 
   // PROGRAM
   const prog = 1.2;
