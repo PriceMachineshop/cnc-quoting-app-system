@@ -81,14 +81,21 @@ drop.ondrop = async (e) => {
   const lower = text.toLowerCase();
 
   // 🔥 FIXED DETECTION
-  window.detected = {
-    holes: (lower.match(/hole|drill|bore|tap|thru|cbore|csink|spotface/g) || []).length,
-    threads: (lower.match(/thread/g) || []).length,
-    tapped: (lower.match(/tap|tapped/g) || []).length,
-    acme: lower.includes("acme"),
-    stub: lower.includes("stub"),
-    tolerance: lower.includes("±") || lower.includes("tolerance")
-  };
+ window.detected = {
+  holes: (lower.match(/hole/g) || []).length,
+  threads: (lower.match(/thread/g) || []).length,
+
+  // NEW — MILL FEATURES
+  slots: (lower.match(/slot/g) || []).length,
+  pockets: (lower.match(/pocket/g) || []).length,
+  keyways: (lower.match(/keyway/g) || []).length,
+  flats: (lower.match(/flat/g) || []).length,
+
+  acme: lower.includes("acme"),
+  stub: lower.includes("stub"),
+  pitch: lower.includes("pitch"),
+  tolerance: lower.includes("±") || lower.includes("tolerance")
+};
 
   calculate();
 };
@@ -122,7 +129,18 @@ function calculate(){
   if(tolerance) lathe += 0.25;
 
   // 🔥 FIXED MILL (THIS WAS YOUR PROBLEM)
-  let mill = 0.75 + holes * 0.05 + tapped * 0.15;
+  const slots = window.detected?.slots || 0;
+const pockets = window.detected?.pockets || 0;
+const keyways = window.detected?.keyways || 0;
+const flats = window.detected?.flats || 0;
+
+// MILL TIME
+let mill = 0.5
+  + holes * 0.03
+  + slots * 0.08
+  + pockets * 0.10
+  + keyways * 0.06
+  + flats * 0.04;
 
   // PROGRAM
   const prog = 1.2;
@@ -147,7 +165,10 @@ function calculate(){
     "ACME: " + (acme ? "YES" : "NO") + "\n" +
     "Stub: " + (stub ? "YES" : "NO") + "\n" +
     "Tolerance: " + (tolerance ? "YES" : "NO") + "\n\n" +
-
+    "Slots: " + slots + "\n" +
+    "Pockets: " + pockets + "\n" +
+    "Keyways: " + keyways + "\n" +
+    "Flats: " + flats + "\n\n" +
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
 
