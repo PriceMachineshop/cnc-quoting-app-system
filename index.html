@@ -87,6 +87,7 @@ function count(regex){
 }
 
 window.detected = {
+  const millingOps = count(/mill|profile|slot|pocket|cut|face/g);
 
   // HOLES (drilled or tapped)
   holes: count(/drill|hole|thru|through/g),
@@ -95,9 +96,9 @@ window.detected = {
   threads: count(/tap|thread|\d+-\d+/g),
 
   // MILL FEATURES
-  slots: count(/slot|slt/g),
-  pockets: count(/pocket|cavity/g),
-  keyways: count(/keyway|key seat/g),
+  slots: count(/slot|slt|mill|profile|cut/g),
+  pockets: count(/pocket|cavity|remove|clear/g),
+  keyways: count(/keyway|key seat|key/g),
   flats: count(/flat/g),
 
   // TURNING FEATURES
@@ -128,7 +129,6 @@ function calculate(){
 
   const holes = window.detected?.holes || 0;
   const threads = window.detected?.threads || 0;
-  const tapped = window.detected?.tapped || 0;
   const acme = window.detected?.acme;
   const stub = window.detected?.stub;
   const tolerance = window.detected?.tolerance;
@@ -174,11 +174,12 @@ const flats = window.detected?.flats || 0;
 let mill = 0.4;
 
 // base features
-mill += window.detected.holes * 0.04;
-mill += window.detected.slots * 0.12;
-mill += window.detected.pockets * 0.15;
-mill += window.detected.keyways * 0.08;
-mill += window.detected.flats * 0.05;
+mill += holes * 0.04;
+mill += slots * 0.12;
+mill += pockets * 0.15;
+mill += keyways * 0.08;
+mill += flats * 0.05;
+mill += millingOps * 0.15;
 
 // complexity bump
 if(window.detected.deepFeatures) mill += 0.3;
@@ -213,7 +214,7 @@ if(window.detected.multiOp) prog += 0.4;
   // OUTPUT
   out.textContent =
     "File: " + fileName + "\n\n" +
-
+    
     "Holes: " + holes + "\n" +
     "Threads: " + threads + "\n" +
     "Tapped: " + tapped + "\n" +
@@ -224,6 +225,7 @@ if(window.detected.multiOp) prog += 0.4;
     "Pockets: " + pockets + "\n" +
     "Keyways: " + keyways + "\n" +
     "Flats: " + flats + "\n\n" +
+    "Milling Ops: " + millingOps + "\n\n" +
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
     "Slots: " + window.detected.slots + "\n" +
