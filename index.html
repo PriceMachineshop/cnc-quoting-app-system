@@ -5,7 +5,7 @@
 </head>
 <body>
 
-<h2>CNC Quote System</h2>
+<h2>CNC Quote System (OCR Enabled)</h2>
 
 <div id="drop" style="border:2px dashed #888;padding:20px;">
   📄 Drag & Drop PDF Here
@@ -32,18 +32,18 @@ Length:
 
 <pre id="out" style="border:1px solid #000;padding:10px;background:#f0f0f0;"></pre>
 
-<!-- ✅ FIXED PDF.JS -->
+<!-- PDF + OCR -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
 
 <script>
 const LATHE_RATE = 120;
 const MILL_RATE = 120;
 const PROGRAM_RATE = 100;
 
-let fileName = "";
-
-// FIX for Electron
 pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+
+let fileName = "";
 
 // MATERIAL REMOVAL
 function volumeRemoved(od,id,len){
@@ -58,7 +58,7 @@ const fileDiv = document.getElementById("file");
 
 drop.ondragover = e => e.preventDefault();
 
-// 🔥 SAFE PDF READER
+// 🚀 MAIN DROP FUNCTION WITH OCR
 drop.ondrop = async (e) => {
   e.preventDefault();
 
@@ -69,8 +69,7 @@ drop.ondrop = async (e) => {
     fileName = file.name;
     fileDiv.innerText = "Loaded: " + file.name;
 
-   // Electron sometimes reports 0 size incorrectly
-console.log("File size:", file.size);
+    out.textContent = "Reading PDF...";
 
     const buffer = await file.arrayBuffer();
 
@@ -79,51 +78,56 @@ console.log("File size:", file.size);
       disableWorker: true
     }).promise;
 
-    let text = "";
+    // Render first page to canvas
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 2 });
 
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(i => i.str).join(" ");
-    }
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
 
-    if (!text || text.trim().length < 5) {
-      out.textContent = "⚠️ No readable text (scanned PDF)";
-      return;
-    }
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
 
+    await page.render({
+      canvasContext: ctx,
+      viewport: viewport
+    }).promise;
+
+    out.textContent = "Running OCR... (first time takes ~10-20 seconds)";
+
+    // OCR
+    const result = await Tesseract.recognize(
+      canvas,
+      'eng',
+      { logger: m => console.log(m) }
+    );
+
+    const text = result.data.text;
     const lower = text.toLowerCase();
 
-    // 🔥 SAFE DETECTION (NO REGEX CRASHES)
+    console.log("OCR TEXT:", text);
+
+    // 🔥 DETECTION
     let threadCount = 0;
     let holeCount = 0;
 
-    try {
-      threadCount += (lower.match(/unc/g) || []).length;
-      threadCount += (lower.match(/unf/g) || []).length;
-      threadCount += (lower.match(/acme/g) || []).length;
-      threadCount += (lower.match(/thread/g) || []).length;
-      threadCount += (lower.match(/tap/g) || []).length;
+    threadCount += (lower.match(/unc/g) || []).length;
+    threadCount += (lower.match(/unf/g) || []).length;
+    threadCount += (lower.match(/acme/g) || []).length;
+    threadCount += (lower.match(/stub/g) || []).length;
+    threadCount += (lower.match(/tap/g) || []).length;
 
-      holeCount += (lower.match(/drill/g) || []).length;
-      holeCount += (lower.match(/bore/g) || []).length;
-      holeCount += (lower.match(/thru/g) || []).length;
-      holeCount += (lower.match(/diameter/g) || []).length;
-    } catch(e) {
-      console.log("Pattern error ignored");
-    }
+    holeCount += (lower.match(/drill/g) || []).length;
+    holeCount += (lower.match(/bore/g) || []).length;
+    holeCount += (lower.match(/thru/g) || []).length;
 
     window.detected = {
       threads: threadCount,
       holes: holeCount,
-
       acme: lower.includes("acme"),
       stub: lower.includes("stub"),
       box: lower.includes("box"),
-
       tapped: lower.includes("tap"),
-      unthreaded: lower.includes("drill") || lower.includes("bore"),
-
       tolerance:
         lower.includes("±") ||
         lower.includes("+/-") ||
@@ -133,7 +137,7 @@ console.log("File size:", file.size);
     calculate();
 
   } catch (err) {
-    out.textContent = "PDF ERROR: " + err.message;
+    out.textContent = "ERROR: " + err.message;
   }
 };
 
@@ -155,15 +159,14 @@ function calculate(){
 
   let lathe = 0.3 + vol * 0.02;
 
-  if(d.threads) lathe += d.threads * 0.08;
-  if(d.acme) lathe += 1.0;
-  if(d.stub) lathe += 0.5;
-  if(d.box) lathe += 0.4;
+  if(d.threads) lathe += d.threads * 0.1;
+  if(d.acme) lathe += 1.2;
+  if(d.stub) lathe += 0.6;
+  if(d.box) lathe += 0.5;
   if(d.tapped) lathe += 0.3;
-  if(d.tolerance) lathe += 0.3;
+  if(d.tolerance) lathe += 0.4;
 
-  let mill = 0.5 + (d.holes || 0) * 0.04;
-  if(d.unthreaded) mill += 0.2;
+  let mill = 0.5 + (d.holes || 0) * 0.05;
 
   const prog = 1.2;
 
@@ -182,8 +185,7 @@ function calculate(){
     "Holes: " + (d.holes || 0) + "\n" +
     "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
     "Stub: " + (d.stub ? "YES" : "NO") + "\n" +
-    "Box: " + (d.box ? "YES" : "NO") + "\n" +
-    "Tapped: " + (d.tapped ? "YES" : "NO") + "\n\n" +
+    "Box: " + (d.box ? "YES" : "NO") + "\n\n" +
 
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
@@ -199,3 +201,6 @@ document.querySelectorAll("input").forEach(el => {
   el.oninput = calculate;
 });
 </script>
+
+</body>
+</html>
