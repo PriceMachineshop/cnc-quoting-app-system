@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Price Machine Quote OCR System</title>
+  <title>CNC Quote System</title>
 </head>
 <body>
 
-<h2>Price Machine Quote System (OCR + Pricing)</h2>
+<h2>CNC Quote System (STABLE)</h2>
 
-<div id="drop" style="border:3px dashed green;padding:30px;">
+<div id="drop" style="border:3px dashed blue;padding:30px;">
   📄 DROP PDF HERE
 </div>
 
@@ -18,7 +18,7 @@
 Qty:
 <input id="qty" type="number" value="10"><br><br>
 
-Material Cost ($ per part):
+Material ($/part):
 <input id="matCost" type="number" value="25"><br><br>
 
 OD:
@@ -32,39 +32,34 @@ Length:
 
 <pre id="out"></pre>
 
+<!-- LOCAL PDF.JS (IMPORTANT) -->
+<script src="pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
 
 <script>
-const LATHE_RATE = 120;
-const MILL_RATE = 120;
-const PROGRAM_RATE = 100;
-
-let fileName = "";
-let detected = {};
-
-// MATERIAL REMOVAL
-function volumeRemoved(od,id,len){
-  const ro = od/2;
-  const ri = id/2;
-  return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
-}
+pdfjsLib.GlobalWorkerOptions.workerSrc = "";
 
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
 const fileDiv = document.getElementById("file");
 
-// DRAG
-drop.ondragover = (e) => {
+let detected = {};
+let fileName = "";
+
+const LATHE_RATE = 120;
+const MILL_RATE = 120;
+const PROGRAM_RATE = 100;
+
+// DRAG UI
+drop.ondragover = e => {
   e.preventDefault();
   drop.style.background = "#ddd";
 };
 
-drop.ondragleave = () => {
-  drop.style.background = "";
-};
+drop.ondragleave = () => drop.style.background = "";
 
-// DROP
-drop.ondrop = async (e) => {
+// 🔥 MAIN DROP (WORKING)
+drop.ondrop = (e) => {
   e.preventDefault();
   drop.style.background = "";
 
@@ -74,47 +69,85 @@ drop.ondrop = async (e) => {
   fileName = file.name;
   fileDiv.innerText = "Loaded: " + file.name;
 
-  try {
-    out.textContent = "Running OCR...\n";
+  out.textContent = "Reading PDF...\n";
 
-    const result = await Tesseract.recognize(file, "eng");
+  const reader = new FileReader();
 
-    const text = result.data.text;
-    const lower = text.toLowerCase();
+  reader.onload = async function () {
+    try {
+      const data = new Uint8Array(this.result);
 
-    console.log("OCR TEXT:", text);
+      const pdf = await pdfjsLib.getDocument({
+        data: data,
+        disableWorker: true
+      }).promise;
 
-    // 🔥 DETECTION
-    let threads = 0;
-    let holes = 0;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 2 });
 
-    threads += (lower.match(/unc/g) || []).length;
-    threads += (lower.match(/unf/g) || []).length;
-    threads += (lower.match(/acme/g) || []).length;
-    threads += (lower.match(/stub/g) || []).length;
-    threads += (lower.match(/tap/g) || []).length;
+      const canvas = document.createElement("canvas");
+      const ctx = canvas.getContext("2d");
 
-    holes += (lower.match(/drill/g) || []).length;
-    holes += (lower.match(/bore/g) || []).length;
-    holes += (lower.match(/thru/g) || []).length;
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
 
-    detected = {
-      threads,
-      holes,
-      acme: lower.includes("acme"),
-      stub: lower.includes("stub"),
-      box: lower.includes("box"),
-      tapped: lower.includes("tap"),
-      tolerance:
-        lower.includes("±") ||
-        lower.includes("+/-") ||
-        lower.includes(".00")
-    };
+      await page.render({
+        canvasContext: ctx,
+        viewport: viewport
+      }).promise;
 
-  function calculate(ocrText){
+      out.textContent = "Running OCR...\n";
+
+      const result = await Tesseract.recognize(canvas, "eng");
+
+      const text = result.data.text;
+      const lower = text.toLowerCase();
+
+      // DETECTION
+      let threads = 0;
+      let holes = 0;
+
+      threads += (lower.match(/unc/g) || []).length;
+      threads += (lower.match(/unf/g) || []).length;
+      threads += (lower.match(/acme/g) || []).length;
+      threads += (lower.match(/stub/g) || []).length;
+      threads += (lower.match(/tap/g) || []).length;
+
+      holes += (lower.match(/drill/g) || []).length;
+      holes += (lower.match(/bore/g) || []).length;
+      holes += (lower.match(/thru/g) || []).length;
+
+      detected = {
+        threads,
+        holes,
+        acme: lower.includes("acme"),
+        stub: lower.includes("stub"),
+        box: lower.includes("box"),
+        tapped: lower.includes("tap")
+      };
+
+      calculate(text);
+
+    } catch (err) {
+      out.textContent = "ERROR: " + err.message;
+    }
+  };
+
+  reader.readAsArrayBuffer(file);
+};
+
+// VOLUME
+function volumeRemoved(od,id,len){
+  const ro = od/2;
+  const ri = id/2;
+  return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
+}
+
+// CALCULATE
+function calculate(ocrText){
 
   if(!detected || detected.threads === undefined){
-    out.textContent = "⚠️ Load a PDF first";
+    out.textContent = "⚠️ Drop a PDF first";
     return;
   }
 
@@ -134,9 +167,8 @@ drop.ondrop = async (e) => {
   if(detected.stub) lathe += 0.6;
   if(detected.box) lathe += 0.5;
   if(detected.tapped) lathe += 0.3;
-  if(detected.tolerance) lathe += 0.4;
 
-  let mill = 0.5 + (detected.holes || 0) * 0.05;
+  let mill = 0.5 + detected.holes * 0.05;
 
   const prog = 1.2;
 
@@ -150,31 +182,22 @@ drop.ondrop = async (e) => {
 
   out.textContent =
     "File: " + fileName + "\n\n" +
-
     "Threads: " + detected.threads + "\n" +
     "Holes: " + detected.holes + "\n" +
-    "ACME: " + (detected.acme ? "YES" : "NO") + "\n" +
-    "Stub: " + (detected.stub ? "YES" : "NO") + "\n" +
-    "Box: " + (detected.box ? "YES" : "NO") + "\n\n" +
-
-    "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
-    "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
-
-    "Material: $" + matCost.toFixed(2) + "\n\n" +
-
-    "PRICE PER PART: $" + price.toFixed(2) + "\n" +
-    "TOTAL: $" + total.toFixed(2) + "\n\n" +
-
-    (ocrText ? "------ OCR TEXT ------\n" + ocrText : "");
+    "ACME: " + (detected.acme ? "YES" : "NO") + "\n\n" +
+    "Lathe: " + lathe.toFixed(2) + " hrs\n" +
+    "Mill: " + mill.toFixed(2) + " hrs\n\n" +
+    "Price/Part: $" + price.toFixed(2) + "\n" +
+    "Total: $" + total.toFixed(2);
 }
 
-// AUTO UPDATE
+// UPDATE INPUTS
 document.querySelectorAll("input").forEach(el => {
   el.oninput = () => {
-  if(detected && detected.threads !== undefined){
-    calculate();
-  }
-};
+    if(detected.threads !== undefined){
+      calculate();
+    }
+  };
 });
 </script>
 
