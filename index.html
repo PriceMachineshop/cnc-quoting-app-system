@@ -3,165 +3,221 @@
 <head>
   <title>CNC Quote System</title>
 </head>
-
 <body>
 
-<h2>CNC Quote System (STABLE)</h2>
+<h2>CNC Quote System</h2>
 
-<input type="file" id="fileInput"><br><br>
+<div id="drop" style="border:2px dashed #888;padding:20px;">
+  📄 Drag & Drop PDF Here
+</div>
 
-Qty: <input id="qty" value="10"><br>
-Material ($/part): <input id="mat" value="25"><br><br>
+<div id="file"></div>
 
-OD: <input id="od" value="2">
-ID: <input id="id" value="0">
-Length: <input id="len" value="4"><br><br>
+<br>
+
+Qty: <input id="qty" type="number" value="10"><br><br>
+Qty:
+<input id="qty" type="number" value="10"><br><br>
+
+Material:
+<select id="material">
+  <option value="aluminum">Aluminum</option>
+  <option value="steel">Steel</option>
+</select><br><br>
+
+OD: <input id="od" type="number" value="2">
+ID: <input id="id" type="number" value="0">
+Length: <input id="length" type="number" value="4"><br><br>
+Material Price ($/lb):
+<input id="matPrice" type="number" value="2.50"><br><br>
 
 <pre id="out"></pre>
+OD:
+<input id="od" type="number" value="2">
 
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/tesseract.min.js"></script>
+ID:
+<input id="id" type="number" value="0">
+
+Length:
+<input id="length" type="number" value="4"><br><br>
+
+<pre id="out" style="border:1px solid #000;padding:10px;background:#f0f0f0;"></pre>
 
 <script>
+const LATHE_RATE = 120;
+    function detectFeatures(fileName){
+  const name = fileName.toLowerCase();
 
-document.getElementById("fileInput").addEventListener("change", function(e){
+  return {
+    holes: (name.match(/hole/g)||[]).length,
+    threads: (name.match(/thread/g)||[]).length
+  };
+}
+const MILL_RATE = 120;
+const PROGRAM_RATE = 100;
+  
+const LATHE_RATE = 120;
+const MILL_RATE = 120;
+const PROGRAM_RATE = 100;
 
-  const file = e.target.files[0];
-  const out = document.getElementById("out");
+let mat = +document.getElementById("mat").value || 0;
 
-  if(!file){
-    out.textContent = "No file selected";
-    return;
-  }
 
-  out.textContent = "Starting OCR...\n";
+let fileName = "";
 
- const out = document.getElementById("out");
+// weight calculation
+function weight(od,id,len,mat){
+  const ro=od/2, ri=id/2;
+  return (Math.PI*ro*ro*len - Math.PI*ri*ri*len)*density[mat];
+  const ro = od/2;
+  const ri = id/2;
+  return (Math.PI*ro*ro*len - Math.PI*ri*ri*len) * density[mat];
+}
 
-out.textContent = "Starting OCR...\n";
+// DRAG & DROP (SAFE VERSION)
+const drop = document.getElementById("drop");
+const out = document.getElementById("out");
+const fileDiv = document.getElementById("file");
 
-Tesseract.recognize(file, "eng", {
-  workerPath: "https://cdn.jsdelivr.net/npm/tesseract.js@4/dist/worker.min.js",
-  corePath: "https://cdn.jsdelivr.net/npm/tesseract.js-core@4/tesseract-core.wasm.js",
-  logger: m => {
-    out.textContent = "OCR Progress: " + Math.round((m.progress || 0)*100) + "%";
-  }
-}).then(result => {
+drop.ondragover = e => e.preventDefault();
 
-  let text = "";
+drop.ondrop = async (e) => {
+drop.ondrop = (e) => {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  fileName = file.name;
+  fileDiv.innerText = "Loaded: " + file.name;
 
+  const text = await file.text(); // basic read
   try {
-    text = result.data.text.toLowerCase();
-  } catch(e) {
-    out.textContent = "OCR failed to read text";
-    return;
-  }
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
 
-  let threads = (text.match(/thread|unc|unf|acme|stub|tap/g) || []).length;
-  let holes = (text.match(/drill|hole|bore/g) || []).length;
+    fileName = file.name;
+    fileDiv.innerText = "Loaded: " + file.name;
 
-  let qty = +document.getElementById("qty").value || 1;
-  let mat = +document.getElementById("mat").value || 0;
-  let od = +document.getElementById("od").value || 0;
-  let len = +document.getElementById("len").value || 0;
+    const lower = file.name.toLowerCase();
 
-  let lathe = 0.5 + (od * len * 0.05) + threads * 0.25;
-  let mill = 0.5 + holes * 0.15;
-
-  let price = lathe*120 + mill*120 + mat;
-  let total = price * qty;
-
-  out.textContent =
-    "Threads: " + threads + "\n" +
-    "Holes: " + holes + "\n\n" +
-    "Price/Part: $" + price.toFixed(2) + "\n" +
-    "Total: $" + total.toFixed(2);
-
-}).catch(err => {
-  out.textContent = "REAL ERROR: " + JSON.stringify(err);
-});
-    logger: m => {
-      out.textContent = "OCR Progress: " + Math.round((m.progress || 0)*100) + "%";
-    }
-  }).then(result => {
-
-   let text = "";
-
-if(result && result.data && result.data.text){
-  text = result.data.text.toLowerCase();
-} else {
-  text = "";
-}
-if(!text){
-  out.textContent = "No readable text found in PDF";
-  return;
-}
-    // 🔍 DETECTION
-    let threads = 0;
-    let holes = 0;
-
-    threads += (text.match(/thread/g) || []).length;
-    threads += (text.match(/unc/g) || []).length;
-    threads += (text.match(/unf/g) || []).length;
-    threads += (text.match(/acme/g) || []).length;
-    threads += (text.match(/stub/g) || []).length;
-    threads += (text.match(/tap/g) || []).length;
-
-    holes += (text.match(/drill/g) || []).length;
-    holes += (text.match(/hole/g) || []).length;
-    holes += (text.match(/bore/g) || []).length;
-
-    const detected = {
-      acme: text.includes("acme"),
-      stub: text.includes("stub"),
-      box: text.includes("box"),
-      tapped: text.includes("tap")
+  const lower = text.toLowerCase();
+    // BASIC FEATURE DETECTION (filename-based)
+    window.detected = {
+      holes: (lower.match(/hole/g) || []).length,
+      threads: (lower.match(/thread/g) || []).length,
+      acme: lower.includes("acme"),
+      stub: lower.includes("stub")
     };
 
-    // 📊 INPUTS
-    let qty = +document.getElementById("qty").value || 1;
-    let mat = +document.getElementById("mat").value || 0;
-    let od = +document.getElementById("od").value || 0;
-    let id = +document.getElementById("id").value || 0;
-    let len = +document.getElementById("len").value || 0;
+  window.detected = {
+    holes: (lower.match(/hole/g)||[]).length,
+    threads: (lower.match(/thread/g)||[]).length,
+    acme: lower.includes("acme"),
+    stub: lower.includes("stub"),
+    pitch: lower.includes("pitch")
+  };
+    calculate();
 
-    // ⚙️ MACHINING TIME
-    let lathe = 0.5 + (od * len * 0.05) + threads * 0.25;
-    let mill = 0.5 + holes * 0.15;
+  calculate();
+  } catch (err) {
+    out.textContent = "Error: " + err.message;
+  }
+};
 
-    // 💰 PRICING
-    let price =
-      lathe * 120 +
-      mill * 120 +
-      mat;
+// MAIN CALCULATION
+function calculate(){
 
-    let total = price * qty;
+  if(!fileName) return;
+  
 
-    // 🖥 OUTPUT
-    out.textContent =
-      "THREAD DETECTION:\n" +
-      "Threads: " + threads + "\n" +
-      "ACME: " + detected.acme + "\n" +
-      "STUB: " + detected.stub + "\n" +
-      "BOX: " + detected.box + "\n" +
-      "TAPPED: " + detected.tapped + "\n\n" +
+  const holes = window.detected?.holes || 0;
+  const threads = window.detected?.threads || 0;
+  const acme = window.detected?.acme;
+  const stub = window.detected?.stub;
 
-      "HOLES: " + holes + "\n\n" +
+  const qty = +document.getElementById("qty").value;
+  const mat = document.getElementById("material").value;
+  const matPrice = +document.getElementById("matPrice").value;
 
-      "LATHE TIME: " + lathe.toFixed(2) + " hrs\n" +
-      "MILL TIME: " + mill.toFixed(2) + " hrs\n\n" +
+  const od = +document.getElementById("od").value;
+  const id = +document.getElementById("id").value;
+  const len = +document.getElementById("length").value;
+  const holes = window.detected?.holes || 0;
+  const threads = window.detected?.threads || 0;
+  const acme = window.detected?.acme;
+  const stub = window.detected?.stub;
 
-      "PRICE / PART: $" + price.toFixed(2) + "\n" +
-      "TOTAL: $" + total.toFixed(2) + "\n\n" +
+  const w = weight(od,id,len,mat);
 
-      "----- OCR TEXT -----\n" + text;
+let lathe = 0.5 + w*0.05 + threads*0.04;
+  // TIME CALCULATIONS
+  let lathe = 0.5 + w*0.05 + threads*0.04;
+  if(acme) lathe += 0.5;
+  if(stub) lathe += 0.25;
 
-  }).catch(err => {
-    out.textContent = "ERROR: " + err.message;
-  });
+if(acme) lathe += 0.5;
+if(stub) lathe += 0.25;
+const mill = 0.75 + holes*0.02;
+  const mill = 0.75 + holes*0.02;
+  const prog = 1;
 
+ const matPrice = +document.getElementById("matPrice").value;
+const materialCost = w * matPrice;
+  // COSTS
+  const materialCost = w * matPrice;
+
+  const price = (
+    lathe * LATHE_RATE +
+    mill * MILL_RATE +
+    (prog / qty) * PROGRAM_RATE +
+    materialCost
+  );
+
+const price = (
+  lathe * LATHE_RATE +
+  mill * MILL_RATE +
+  (prog / qty) * PROGRAM_RATE +
+  materialCost
+);
+  const total = price * qty;
+
+  // OUTPUT
+  out.textContent =
+    "File: " + fileName + "\\n" +
+    "Material Cost: $" + materialCost.toFixed(2) + "\\n" +
+    "Lathe Time: " + lathe.toFixed(2) + " hrs\\n" +
+    "ACME Thread: " + (acme ? "YES" : "NO") + "\\n" +
+    "Stub Thread: " + (stub ? "YES" : "NO") + "\\n" +
+    "Mill Time: " + mill.toFixed(2) + " hrs\\n" +
+    "Holes: " + holes + "\\n" +
+    "Threads: " + threads + "\\n" +
+    "Weight: " + w.toFixed(2) + " lbs\\n" +
+    "Price/Part: $" + price.toFixed(2) + "\\n" +
+    "File: " + fileName + "\n" +
+    "Qty: " + qty + "\n\n" +
+
+    "Holes: " + holes + "\n" +
+    "Threads: " + threads + "\n" +
+    "ACME Thread: " + (acme ? "YES" : "NO") + "\n" +
+    "Stub Thread: " + (stub ? "YES" : "NO") + "\n\n" +
+
+    "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
+    "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
+
+    "Weight: " + w.toFixed(2) + " lbs\n" +
+    "Material Cost: $" + materialCost.toFixed(2) + "\n\n" +
+
+    "Price/Part: $" + price.toFixed(2) + "\n" +
+    "Total: $" + total.toFixed(2);
+}
+
+document.querySelectorAll("input, select").forEach(el => el.oninput = calculate);
+// AUTO RECALCULATE
+document.querySelectorAll("input, select").forEach(el => {
+  el.oninput = calculate;
 });
-
 </script>
+
+</body>
+</html>
 
 </body>
 </html>
