@@ -83,10 +83,15 @@ drop.ondrop = async (e) => {
     return (lower.match(regex) || []).length;
   }
 
-  // ✅ DETECTION
+  // ✅ DETECTION (FIXED + STRONGER)
   window.detected = {
+
     holes: count(/drill|hole|thru|through/g),
-    threadSize: (lower.match(/\d+(\.\d+)?-\d+/g) || []).join(", "),
+
+    // 🔥 FIXED UN THREAD DETECTION
+    threads: count(/tap|thread|\d+(\.\d+)?-\d+\s*(unc|unf|un|tpi)?/g),
+
+    threadSize: (lower.match(/\d+(\.\d+)?-\d+\s*(unc|unf|un)?/g) || []).join(", "),
     tpi: (lower.match(/\d+\s*tpi/g) || []).join(", "),
 
     slots: count(/slot|slt|mill|profile|cut/g),
@@ -97,8 +102,12 @@ drop.ondrop = async (e) => {
     grooves: count(/groove|undercut/g),
     chamfers: count(/chamfer/g),
 
-    pin: /pin|external thread|od thread/.test(lower),
-    box: /box|internal thread|id thread/.test(lower),
+    acme: lower.includes("acme"),
+    stub: lower.includes("stub"),
+
+    // 🔥 BETTER PIN / BOX DETECTION
+    pin: /pin|external|od thread/.test(lower),
+    box: /box|internal|id thread|tap|unc|unf/.test(lower),
 
     tightTol: lower.includes(".001"),
     veryTightTol: lower.includes(".0005"),
@@ -107,7 +116,7 @@ drop.ondrop = async (e) => {
     multiOp: lower.includes("flip") || lower.includes("2nd op")
   };
 
-  // ✅ GLOBAL MILLING DETECTION
+  // GLOBAL MILL DETECTION
   window.millingOps = count(/mill|profile|slot|pocket|cut|face/g);
 
   calculate();
@@ -136,15 +145,18 @@ function calculate(){
 
   // LATHE
   let lathe = 0.25;
+
   lathe += volumeRemoved(od,id,len) * 0.02;
   lathe += threads * 0.08;
 
   if(d.acme) lathe += 0.75;
   if(d.stub) lathe += 0.35;
-  if(d.pin) lathe += 0.25;   // external threading (pin)
-  if(d.box) lathe += 0.35;   // internal threading (box is slower)
+
+  if(d.pin) lathe += 0.25;
+  if(d.box) lathe += 0.35;
+
   if(d.acme && d.stub) lathe += 0.5;
-  
+
   lathe += d.grooves * 0.05;
   lathe += d.chamfers * 0.02;
 
@@ -161,7 +173,6 @@ function calculate(){
   mill += keyways * 0.08;
   mill += flats * 0.05;
 
-  // 🔥 THIS FIXES YOUR ISSUE
   mill += (window.millingOps || 0) * 0.15;
 
   if(d.deepFeatures) mill += 0.3;
@@ -171,6 +182,7 @@ function calculate(){
 
   // PROGRAM
   let prog = 0.8;
+
   prog += threads * 0.1;
   prog += slots * 0.05;
   prog += pockets * 0.08;
@@ -198,9 +210,10 @@ function calculate(){
     "Box (ID Thread): " + (d.box ? "YES" : "NO") + "\n" +
     "Thread Size: " + (d.threadSize || "N/A") + "\n" +
     "TPI: " + (d.tpi || "N/A") + "\n\n" +
+
     "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
     "Stub: " + (d.stub ? "YES" : "NO") + "\n\n" +
-     
+
     "Slots: " + slots + "\n" +
     "Pockets: " + pockets + "\n" +
     "Keyways: " + keyways + "\n" +
