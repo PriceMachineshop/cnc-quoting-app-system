@@ -1,11 +1,3 @@
-Added a Raw Text Preview toggle so you can inspect exactly what was extracted from PDF text + OCR.
-It now shows:
-
-PDF selectable text
-OCR text (if run)
-Combined text used for feature detection
-Here’s the updated full HTML:
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -13,64 +5,16 @@ Here’s the updated full HTML:
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CNC Quote System (PDF + OCR)</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 20px;
-      max-width: 960px;
-    }
-    #drop {
-      border: 2px dashed #888;
-      padding: 20px;
-      border-radius: 8px;
-      margin-bottom: 12px;
-      background: #fafafa;
-      cursor: pointer;
-    }
-    .row {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin: 8px 0;
-      align-items: center;
-    }
-    label {
-      display: inline-flex;
-      gap: 6px;
-      align-items: center;
-    }
-    input[type="number"] {
-      width: 90px;
-      padding: 4px;
-    }
-    #file {
-      margin-bottom: 10px;
-      font-weight: bold;
-    }
-    #out {
-      border: 1px solid #000;
-      padding: 10px;
-      background: #f0f0f0;
-      white-space: pre-wrap;
-      min-height: 280px;
-    }
-    .hint {
-      color: #555;
-      font-size: 13px;
-      margin-top: 6px;
-    }
-    #rawWrap {
-      margin-top: 12px;
-      display: none;
-    }
-    #raw {
-      border: 1px solid #000;
-      padding: 10px;
-      background: #fbfbfb;
-      white-space: pre-wrap;
-      max-height: 360px;
-      overflow: auto;
-      font-size: 12px;
-    }
+    body { font-family: Arial, sans-serif; margin: 20px; max-width: 960px; }
+    #drop { border: 2px dashed #888; padding: 20px; border-radius: 8px; margin-bottom: 12px; background: #fafafa; cursor: pointer; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
+    label { display: inline-flex; gap: 6px; align-items: center; }
+    input[type="number"] { width: 90px; padding: 4px; }
+    #file { margin-bottom: 10px; font-weight: bold; }
+    #out { border: 1px solid #000; padding: 10px; background: #f0f0f0; white-space: pre-wrap; min-height: 280px; }
+    .hint { color: #555; font-size: 13px; margin-top: 6px; }
+    #rawWrap { margin-top: 12px; display: none; }
+    #raw { border: 1px solid #000; padding: 10px; background: #fbfbfb; white-space: pre-wrap; max-height: 360px; overflow: auto; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -78,7 +22,7 @@ Here’s the updated full HTML:
   <div id="drop">📄 Drag & Drop PDF Here (or click to pick file)</div>
   <input id="picker" type="file" accept="application/pdf" style="display:none" />
   <div id="file">No file loaded</div>
-  <div class="hint">Scanned PDFs are supported with OCR fallback (slower).</div>
+  <div class="hint">Scanned PDFs are supported with OCR (slower, but more accurate for prints).</div>
   <div class="row">
     <label>Qty: <input id="qty" type="number" value="10" min="1" /></label>
     <label>Material Cost/Part ($): <input id="matCost" type="number" value="25" step="0.01" /></label>
@@ -96,9 +40,7 @@ Here’s the updated full HTML:
     <strong>Raw Text Preview (Debug)</strong>
     <pre id="raw">No extracted text yet.</pre>
   </div>
-  <!-- PDF.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <!-- OCR -->
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc =
@@ -109,7 +51,6 @@ Here’s the updated full HTML:
     let fileName = "";
     let detected = null;
     let millingOps = 0;
-    // Debug text buckets
     let lastPdfText = "";
     let lastOcrText = "";
     let lastCombinedText = "";
@@ -126,17 +67,43 @@ Here’s the updated full HTML:
       return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
     }
     function normalizeText(s) {
-      return s
+      return (s || "")
         .toLowerCase()
         .replace(/[\u2010-\u2015]/g, "-")
+        .replace(/[|]/g, " ")
         .replace(/\s+/g, " ")
         .trim();
     }
     function normalizeForOcrKeywords(s) {
-      // Normalize common OCR variants for "millwork"
       return s
         .replace(/\bm[i1l]{2}[-\s]*w[o0]rk\b/g, "millwork")
-        .replace(/\bmill[-\s]*w[o0]rk\b/g, "millwork");
+        .replace(/\bmi11[-\s]*w[o0]rk\b/g, "millwork")
+        .replace(/\bmil[-\s]*w[o0]rk\b/g, "millwork")
+        .replace(/\bmill[-\s]*wrk\b/g, "millwork")
+        .replace(/\bmilling[-\s]*work\b/g, "millwork");
+    }
+    function hasMillworkApprox(text) {
+      const t = normalizeForOcrKeywords(normalizeText(text));
+      // Direct/regex forms
+      if (/\b(millwork|mill[-\s]*work|milling|milling[-\s]*op(?:eration)?s?)\b/.test(t)) return true;
+      if (/\b(mill|milling)\b/.test(t)) return true;
+      // OCR-rough variants like "mil wrk", "mll work"
+      if (/\b(m[i1l]{1,3}|mll|mil)\s*(w[o0]?rk|wrk)\b/.test(t)) return true;
+      return false;
+    }
+    function preprocessCanvasForOCR(canvas) {
+      const ctx = canvas.getContext("2d");
+      const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const d = img.data;
+      // Simple grayscale + threshold (helps blueprint/scanned prints)
+      for (let i = 0; i < d.length; i += 4) {
+        const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        const bw = gray > 170 ? 255 : 0;
+        d[i] = bw;
+        d[i + 1] = bw;
+        d[i + 2] = bw;
+      }
+      ctx.putImageData(img, 0, 0);
     }
     function truncateText(s, max = 14000) {
       if (!s) return "";
@@ -150,12 +117,9 @@ Here’s the updated full HTML:
       }
       rawWrap.style.display = "block";
       raw.textContent =
-        "=== PDF TEXT (selectable) ===\n" +
-        (truncateText(lastPdfText) || "(none)") +
-        "\n\n=== OCR TEXT ===\n" +
-        (truncateText(lastOcrText) || "(none)") +
-        "\n\n=== COMBINED TEXT USED FOR ANALYSIS ===\n" +
-        (truncateText(lastCombinedText) || "(none)");
+        "=== PDF TEXT (selectable) ===\n" + (truncateText(lastPdfText) || "(none)") +
+        "\n\n=== OCR TEXT ===\n" + (truncateText(lastOcrText) || "(none)") +
+        "\n\n=== COMBINED TEXT USED FOR ANALYSIS ===\n" + (truncateText(lastCombinedText) || "(none)");
     }
     async function extractTextFromPdf(pdf) {
       let text = "";
@@ -170,12 +134,13 @@ Here’s the updated full HTML:
       let ocrText = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 2.0 });
+        const viewport = page.getViewport({ scale: 3.0 }); // higher scale improves OCR
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
         canvas.width = Math.ceil(viewport.width);
         canvas.height = Math.ceil(viewport.height);
         await page.render({ canvasContext: ctx, viewport }).promise;
+        preprocessCanvasForOCR(canvas);
         const result = await Tesseract.recognize(canvas, "eng", {
           logger: (m) => {
             if (m.status === "recognizing text") {
@@ -183,9 +148,10 @@ Here’s the updated full HTML:
                 statusPrefix + "\n" +
                 "Page " + i + "/" + pdf.numPages + " - " + Math.round(m.progress * 100) + "%";
             }
-          }
+          },
+          tessedit_pageseg_mode: "6"
         });
-        ocrText += " " + result.data.text;
+        ocrText += " " + (result.data.text || "");
       }
       return ocrText;
     }
@@ -206,8 +172,7 @@ Here’s the updated full HTML:
       );
       detected = {
         holes: count(/\b(drill|hole|thru|through)\b/g),
-        threads:
-          count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) + uniqueThreadSizes.length,
+        threads: count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) + uniqueThreadSizes.length,
         threadSize: uniqueThreadSizes.join(", "),
         tpi: (text.match(/\b\d+\s*tpi\b/g) || []).join(", "),
         slots: count(/\b(slot|slt|profile|cut)\b/g),
@@ -226,7 +191,9 @@ Here’s the updated full HTML:
         deepFeatures: has(/\bdeep\b/),
         multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/)
       };
+      const approxMillwork = hasMillworkApprox(text);
       detected.hasMillwork =
+        approxMillwork ||
         millingOps > 0 ||
         detected.slots > 0 ||
         detected.pockets > 0 ||
@@ -247,7 +214,6 @@ Here’s the updated full HTML:
       const od = +document.getElementById("od").value || 0;
       const id = +document.getElementById("id").value || 0;
       const len = +document.getElementById("length").value || 0;
-      // Lathe
       let lathe = 0.25;
       lathe += volumeRemoved(od, id, len) * 0.02;
       lathe += threads * 0.08;
@@ -261,7 +227,6 @@ Here’s the updated full HTML:
       if (d.tightTol) lathe += 0.25;
       if (d.veryTightTol) lathe += 0.5;
       if (d.multiOp) lathe += 0.4;
-      // Mill
       let mill = 0;
       if (d.hasMillwork) {
         mill = 0.4;
@@ -276,7 +241,6 @@ Here’s the updated full HTML:
         if (d.veryTightTol) mill += 0.4;
         if (d.multiOp) mill += 0.5;
       }
-      // Programming
       let prog = 0.8;
       prog += threads * 0.1;
       prog += slots * 0.05;
@@ -285,11 +249,7 @@ Here’s the updated full HTML:
       if (d.stub) prog += 0.2;
       if (d.box) prog += 0.2;
       if (d.multiOp) prog += 0.4;
-      const price =
-        lathe * LATHE_RATE +
-        mill * MILL_RATE +
-        (prog / qty) * PROGRAM_RATE +
-        matCost;
+      const price = lathe * LATHE_RATE + mill * MILL_RATE + (prog / qty) * PROGRAM_RATE + matCost;
       const total = price * qty;
       out.textContent =
         "File: " + fileName + "\n\n" +
@@ -325,44 +285,31 @@ Here’s the updated full HTML:
         fileName = file.name;
         fileDiv.textContent = "Loaded: " + fileName;
         out.textContent = "Reading PDF...";
-        // Reset debug text each run
         lastPdfText = "";
         lastOcrText = "";
         lastCombinedText = "";
         updateRawPreview();
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        let text = await extractTextFromPdf(pdf);
-        lastPdfText = text;
-        // If PDF has no embedded text at all, OCR everything.
-        if (!text.trim()) {
-          const ocrAll = await extractTextWithOCR(pdf, "No selectable text found. Running OCR...");
-          text = ocrAll;
-          lastOcrText = ocrAll;
-        }
-        if (!text.trim()) {
+        const pdfText = await extractTextFromPdf(pdf);
+        lastPdfText = pdfText;
+        // Always run OCR and merge with PDF text (more robust for scanned prints)
+        const ocrText = await extractTextWithOCR(pdf, "Running OCR for print feature detection...");
+        lastOcrText = ocrText;
+        const combined = (pdfText + " " + ocrText).trim();
+        if (!combined) {
           out.textContent = "Could not extract text, even with OCR. Try a clearer scan.";
           updateRawPreview();
           return;
         }
-        analyzeFeatures(text);
-        // If no millwork is found initially, verify with OCR and merge.
-        if (!detected.hasMillwork) {
-          const ocrText = await extractTextWithOCR(pdf, "No millwork detected in PDF text. Verifying with OCR...");
-          if (ocrText.trim()) {
-            lastOcrText = (lastOcrText + " " + ocrText).trim();
-            text = (text + " " + ocrText).trim();
-            analyzeFeatures(text);
-          }
-        }
-        lastCombinedText = text;
+        lastCombinedText = combined;
+        analyzeFeatures(combined);
         calculate();
       } catch (err) {
         console.error(err);
         out.textContent = "PDF parse error: " + (err && err.message ? err.message : String(err));
       }
     }
-    // Drag/drop
     drop.ondragover = (e) => e.preventDefault();
     drop.ondragenter = (e) => e.preventDefault();
     drop.ondrop = async (e) => {
@@ -370,18 +317,15 @@ Here’s the updated full HTML:
       const file = e.dataTransfer.files[0];
       await processFile(file);
     };
-    // Click to browse
     drop.onclick = () => picker.click();
     picker.onchange = async (e) => {
       const file = e.target.files[0];
       await processFile(file);
       picker.value = "";
     };
-    // Recalculate when manual values change
     document.querySelectorAll("input[type='number']").forEach((el) => {
       el.addEventListener("input", calculate);
     });
-    // Toggle raw preview
     showRaw.addEventListener("change", updateRawPreview);
   </script>
 </body>
