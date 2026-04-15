@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CNC Quote System (PDF + OCR)</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; max-width: 960px; }
+    body { font-family: Arial, sans-serif; margin: 20px; max-width: 980px; }
     #drop { border: 2px dashed #888; padding: 20px; border-radius: 8px; margin-bottom: 12px; background: #fafafa; cursor: pointer; }
     .row { display: flex; gap: 12px; flex-wrap: wrap; margin: 8px 0; align-items: center; }
     label { display: inline-flex; gap: 6px; align-items: center; }
@@ -22,7 +22,7 @@
   <div id="drop">📄 Drag & Drop PDF Here (or click to pick file)</div>
   <input id="picker" type="file" accept="application/pdf" style="display:none" />
   <div id="file">No file loaded</div>
-  <div class="hint">Scanned PDFs are supported with OCR (slower, but more accurate for prints).</div>
+  <div class="hint">Scanned PDFs use OCR (slower, more robust for prints).</div>
   <div class="row">
     <label>Qty: <input id="qty" type="number" value="10" min="1" /></label>
     <label>Material Cost/Part ($): <input id="matCost" type="number" value="25" step="0.01" /></label>
@@ -45,9 +45,9 @@
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-    const LATHE_RATE = 120;
-    const MILL_RATE = 120;
-    const PROGRAM_RATE = 100;
+    const LATHE_RATE = 110;
+    const MILL_RATE = 130;
+    const PROGRAM_RATE = 120;
     let fileName = "";
     let detected = null;
     let millingOps = 0;
@@ -80,16 +80,23 @@
         .replace(/\bmi11[-\s]*w[o0]rk\b/g, "millwork")
         .replace(/\bmil[-\s]*w[o0]rk\b/g, "millwork")
         .replace(/\bmill[-\s]*wrk\b/g, "millwork")
-        .replace(/\bmilling[-\s]*work\b/g, "millwork");
+        .replace(/\bsl[o0]t\b/g, "slot")
+        .replace(/\bs\s*l\s*o\s*t\b/g, "slot")
+        .replace(/\bslt\b/g, "slot")
+        .replace(/\bobl[o0]ng\b/g, "oblong")
+        .replace(/\belongat(?:ed|e)\s*hol[ea]\b/g, "elongated hole")
+        .replace(/\bwindows?\b/g, "window")
+        .replace(/\bkey\s*seat\b/g, "keyway");
     }
     function preprocessCanvasForOCR(canvas) {
       const ctx = canvas.getContext("2d");
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = img.data;
-      // Grayscale + threshold to improve OCR on scans/prints.
+      // Contrast stretch + grayscale + threshold.
       for (let i = 0; i < d.length; i += 4) {
         const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
-        const bw = gray > 170 ? 255 : 0;
+        const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.35 + 128));
+        const bw = boosted > 165 ? 255 : 0;
         d[i] = bw;
         d[i + 1] = bw;
         d[i + 2] = bw;
@@ -121,52 +128,61 @@
       }
       return text;
     }
+    async function ocrPage(canvas, psmMode, status) {
+      const result = await Tesseract.recognize(canvas, "eng", {
+        logger: (m) => {
+          if (m.status === "recognizing text") {
+            out.textContent = status + " " + Math.round(m.progress * 100) + "%";
+          }
+        },
+        tessedit_pageseg_mode: String(psmMode)
+      });
+      return result.data && result.data.text ? result.data.text : "";
+    }
     async function extractTextWithOCR(pdf, statusPrefix = "Running OCR...") {
       let ocrText = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 3.0 });
+        const viewport = page.getViewport({ scale: 3.2 });
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
         canvas.width = Math.ceil(viewport.width);
         canvas.height = Math.ceil(viewport.height);
         await page.render({ canvasContext: ctx, viewport }).promise;
         preprocessCanvasForOCR(canvas);
-        const result = await Tesseract.recognize(canvas, "eng", {
-          logger: (m) => {
-            if (m.status === "recognizing text") {
-              out.textContent =
-                statusPrefix + "\n" +
-                "Page " + i + "/" + pdf.numPages + " - " + Math.round(m.progress * 100) + "%";
-            }
-          },
-          tessedit_pageseg_mode: "6"
-        });
-        ocrText += " " + (result.data.text || "");
+        // Two OCR modes merged: dense text + sparse callouts.
+        const textA = await ocrPage(
+          canvas,
+          6,
+          statusPrefix + "\nPage " + i + "/" + pdf.numPages + " (mode 1/2) -"
+        );
+        const textB = await ocrPage(
+          canvas,
+          11,
+          statusPrefix + "\nPage " + i + "/" + pdf.numPages + " (mode 2/2) -"
+        );
+        ocrText += " " + textA + " " + textB;
       }
       return ocrText;
     }
     function millworkScore(text) {
       const c = (re) => (text.match(re) || []).length;
-      // Strong indicators.
-      const strong = c(/\b(slot|keyway|pocket|flat(s)?|cross[-\s]*hole|milled)\b/g) * 3;
-      // Medium indicators.
-      const medium = c(/\b(profile|contour|face\s*mill|machined\s*surface|cavity)\b/g) * 2;
-      // Weak indicators.
+      const strong = c(/\b(slot|slots|oblong|window|elongated hole|pocket|keyway|flat(s)?|cross[-\s]*hole|milled)\b/g) * 3;
+      const medium = c(/\b(profile|contour|face\s*mill|machined\s*surface|cavity|millwork)\b/g) * 2;
       const weak = c(/\b(mill|milling|surface)\b/g);
-      // Negative indicators that should suppress false positives.
-      const negative = c(/\b(turn(ed)?\s*only|lathe\s*only|no\s*milling|turned\s*complete)\b/g) * 2;
-      // Setup cues often imply milling operations.
+      const negative = c(/\b(turn(ed)?\s*only|lathe\s*only|no\s*milling|turned\s*complete|all turning)\b/g) * 2;
       const setupCues = c(/\b(2nd\s*op|second\s*op|index|indexed|rotate\s*90|4th\s*axis|multiple\s*setups?)\b/g);
-      // Feature cues boost confidence when multiple non-turning features are present.
-      const featureCues = c(/\b(slot|pocket|keyway|flat(s)?|cross[-\s]*hole)\b/g);
-      const score = strong + medium + weak + setupCues - negative;
-      // Final decision: generic, conservative, and robust across print styles.
+      // Typical slot notation cue: e.g. "3X .375 X 1.125" (kept weak to avoid false positives).
+      const slotDimCues =
+        c(/\b\d+\s*x\s*\.?\d+(?:\.\d+)?\s*x\s*\.?\d+(?:\.\d+)?\b/g) +
+        c(/\b\d+\s*x\s*(slot|oblong|window)\b/g);
+      const score = strong + medium + weak + setupCues + Math.min(slotDimCues, 3) - negative;
       const hasMillwork =
         score >= 3 ||
-        featureCues >= 2 ||
+        c(/\b(slot|oblong|elongated hole|window|keyway|pocket)\b/g) >= 2 ||
         /\b(milled\s*(feature|surface|area)|requires\s*milling)\b/.test(text);
-      return { score, hasMillwork, featureCues };
+      const confidence = score >= 7 ? "HIGH" : score >= 3 ? "MEDIUM" : "LOW";
+      return { score, hasMillwork, confidence };
     }
     function analyzeFeatures(rawText) {
       const lower = normalizeText(rawText);
@@ -181,7 +197,7 @@
       const hasStub = has(/\bstub\b/);
       const hasStubAcme = has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/);
       millingOps = count(
-        /\b(mill|milling|mill[-\s]*work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
+        /\b(mill|milling|mill[-\s]*work|profile|slot|oblong|window|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
       );
       const mw = millworkScore(text);
       detected = {
@@ -189,7 +205,7 @@
         threads: count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) + uniqueThreadSizes.length,
         threadSize: uniqueThreadSizes.join(", "),
         tpi: (text.match(/\b\d+\s*tpi\b/g) || []).join(", "),
-        slots: count(/\b(slot|slt|profile|cut)\b/g),
+        slots: count(/\b(slot|slt|oblong|window|elongated hole|profile|cut)\b/g),
         pockets: count(/\b(pocket|cavity|remove|clear)\b/g),
         keyways: count(/\b(keyway|key seat)\b/g),
         flats: count(/\bflat(s)?\b/g),
@@ -205,7 +221,8 @@
         deepFeatures: has(/\bdeep\b/),
         multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/),
         hasMillwork: mw.hasMillwork,
-        millScore: mw.score
+        millScore: mw.score,
+        millConfidence: mw.confidence
       };
     }
     function calculate() {
@@ -272,7 +289,8 @@
         "Stub ACME: " + (d.stubAcme ? "YES" : "NO") + "\n\n" +
         "Millwork Detected: " + (d.hasMillwork ? "YES" : "NO") + "\n" +
         "Mill Score: " + (d.millScore || 0) + "\n" +
-        "Slots: " + slots + "\n" +
+        "Mill Confidence: " + (d.millConfidence || "LOW") + "\n" +
+        "Slots/Slot-like: " + slots + "\n" +
         "Pockets: " + pockets + "\n" +
         "Keyways: " + keyways + "\n" +
         "Flats: " + flats + "\n" +
@@ -300,9 +318,8 @@
         updateRawPreview();
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        // Always run both: selectable PDF text + OCR.
         const pdfText = await extractTextFromPdf(pdf);
-        const ocrText = await extractTextWithOCR(pdf, "Running OCR for print feature detection...");
+        const ocrText = await extractTextWithOCR(pdf, "Running OCR for feature detection...");
         lastPdfText = pdfText;
         lastOcrText = ocrText;
         const combined = (pdfText + " " + ocrText).trim();
