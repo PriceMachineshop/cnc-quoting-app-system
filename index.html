@@ -40,3 +40,70 @@ const MILL_RATE = 130;
 const PROGRAM_RATE = 120;
 
 let fileName = "";
+
+// VOLUME
+function volumeRemoved(od,id,len){
+  const ro = od/2;
+  const ri = id/2;
+  return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
+}
+
+// ELEMENTS
+const drop = document.getElementById("drop");
+const out = document.getElementById("out");
+const fileDiv = document.getElementById("file");
+
+// DRAG
+drop.ondragover = e => e.preventDefault();
+
+// DROP
+drop.ondrop = async (e) => {
+  e.preventDefault();
+
+  const file = e.dataTransfer.files[0];
+  if (!file || file.type !== 'application/pdf') {
+    alert('Please drop a PDF file');
+    return;
+  }
+
+  fileName = file.name;
+  fileDiv.innerText = "Loaded: " + file.name;
+
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({data: arrayBuffer}).promise;
+
+    let text = "";
+
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(item => item.str).join(" ") + " ";
+    }
+
+    const lower = text.toLowerCase();
+
+    function count(regex){
+      return (lower.match(regex) || []).length;
+    }
+
+    // DETECTION
+    window.detected = {
+      holes: count(/\b(drill|hole|thru|through)\b/g),
+      
+      threads: count(/\b(tap|thread|\d+(\.\d+)?-\d+)\b/g),
+      threadSize: (lower.match(/\d+(\.\d+)?-\d+\s*(unc|unf|un)?/g) || []).join(", "),
+      tpi: (lower.match(/\d+\s*tpi/g) || []).join(", "),
+
+      slots: count(/\b(slot|slt|mill|profile)\b/g),
+      pockets: count(/\b(pocket|cavity|remove|clear)\b/g),
+      keyways: count(/\b(keyway|key)\b/g),
+      flats: count(/\bflat\b/g),
+
+      grooves: count(/\b(groove|undercut)\b/g),
+      chamfers: count(/\bchamfer\b/g),
+
+      pin: /\b(pin|external|od thread)\b/.test(lower),
+      box: /\b(box|internal|id thread|tap)\b/.test(lower),
+      
+      // FIXED ACME & STUB DETECTION
