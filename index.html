@@ -43,7 +43,7 @@
       padding: 10px;
       background: #f0f0f0;
       white-space: pre-wrap;
-      min-height: 260px;
+      min-height: 280px;
     }
     .hint {
       color: #555;
@@ -93,7 +93,7 @@
     function normalizeText(s) {
       return s
         .toLowerCase()
-        .replace(/[\u2010-\u2015]/g, "-") // normalize dash variants
+        .replace(/[\u2010-\u2015]/g, "-")
         .replace(/\s+/g, " ")
         .trim();
     }
@@ -133,7 +133,6 @@
       const lower = normalizeText(rawText);
       const count = (regex) => (lower.match(regex) || []).length;
       const has = (regex) => regex.test(lower);
-      // Thread formats: 1-8, 1.5-8, 7/8-9, etc.
       const threadSizeRegex =
         /\b(?:\d+(?:\.\d+)?|\d+\/\d+)-\d+\s*(?:unc|unf|un|acme)?\b/g;
       const threadMatches = lower.match(threadSizeRegex) || [];
@@ -141,7 +140,6 @@
       const hasAcme = has(/\bacme\b/);
       const hasStub = has(/\bstub\b/);
       const hasStubAcme = has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/);
-      // Better millwork detection
       millingOps = count(
         /\b(mill|milling|millwork|mill-work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
       );
@@ -167,6 +165,13 @@
         deepFeatures: has(/\bdeep\b/),
         multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/)
       };
+      // Only quote milling when true millwork features exist
+      detected.hasMillwork =
+        millingOps > 0 ||
+        detected.slots > 0 ||
+        detected.pockets > 0 ||
+        detected.keyways > 0 ||
+        detected.flats > 0;
     }
     function calculate() {
       if (!fileName || !detected) return;
@@ -196,18 +201,21 @@
       if (d.tightTol) lathe += 0.25;
       if (d.veryTightTol) lathe += 0.5;
       if (d.multiOp) lathe += 0.4;
-      // Mill
-      let mill = 0.4;
-      mill += holes * 0.04;
-      mill += slots * 0.12;
-      mill += pockets * 0.15;
-      mill += keyways * 0.08;
-      mill += flats * 0.05;
-      mill += millingOps * 0.15;
-      if (d.deepFeatures) mill += 0.3;
-      if (d.tightTol) mill += 0.2;
-      if (d.veryTightTol) mill += 0.4;
-      if (d.multiOp) mill += 0.5;
+      // Mill - only if millwork is detected
+      let mill = 0;
+      if (d.hasMillwork) {
+        mill = 0.4;
+        mill += holes * 0.04;
+        mill += slots * 0.12;
+        mill += pockets * 0.15;
+        mill += keyways * 0.08;
+        mill += flats * 0.05;
+        mill += millingOps * 0.15;
+        if (d.deepFeatures) mill += 0.3;
+        if (d.tightTol) mill += 0.2;
+        if (d.veryTightTol) mill += 0.4;
+        if (d.multiOp) mill += 0.5;
+      }
       // Programming
       let prog = 0.8;
       prog += threads * 0.1;
@@ -234,6 +242,7 @@
         "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
         "Stub: " + (d.stub ? "YES" : "NO") + "\n" +
         "Stub ACME: " + (d.stubAcme ? "YES" : "NO") + "\n\n" +
+        "Millwork Detected: " + (d.hasMillwork ? "YES" : "NO") + "\n" +
         "Slots: " + slots + "\n" +
         "Pockets: " + pockets + "\n" +
         "Keyways: " + keyways + "\n" +
@@ -258,7 +267,6 @@
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         let text = await extractTextFromPdf(pdf);
-        // OCR fallback for scanned/image PDFs
         if (!text.trim()) {
           text = await extractTextWithOCR(pdf);
         }
