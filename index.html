@@ -1,150 +1,239 @@
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script>
-const LATHE_RATE = 110;
-const MILL_RATE = 130;
-const PROGRAM_RATE = 120;
-let fileName = "";
-function volumeRemoved(od, id, len) {
-  const ro = od / 2;
-  const ri = id / 2;
-  return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
-}
-const drop = document.getElementById("drop");
-const out = document.getElementById("out");
-const fileDiv = document.getElementById("file");
-drop.ondragover = (e) => e.preventDefault();
-drop.ondrop = async (e) => {
-  e.preventDefault();
-  const file = e.dataTransfer.files[0];
-  if (!file) return;
-  fileName = file.name;
-  fileDiv.innerText = "Loaded: " + file.name;
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let text = "";
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    text += " " + content.items.map((x) => x.str).join(" ");
-  }
-  // Normalize PDF text to improve matching reliability
-  const lower = text
-    .toLowerCase()
-    .replace(/[\u2010-\u2015]/g, "-") // normalize dash variants
-    .replace(/\s+/g, " ")
-    .trim();
-  const count = (regex) => (lower.match(regex) || []).length;
-  const has = (regex) => regex.test(lower);
-  // Thread patterns: 1-8, 1.5-8, 7/8-9, etc.
-  const threadSizeRegex = /\b(?:\d+(?:\.\d+)?|\d+\/\d+)-\d+\s*(?:unc|unf|un|acme)?\b/g;
-  const threadMatches = lower.match(threadSizeRegex) || [];
-  const uniqueThreadSizes = [...new Set(threadMatches)];
-  // Better ACME/STUB detection (including "stub acme", "acme stub", hyphenated variants)
-  const hasAcme = has(/\bacme\b/);
-  const hasStub = has(/\bstub\b/);
-  const hasStubAcme = has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/);
-  // Better millwork / milling op detection
-  const millingRegex = /\b(mill|milling|millwork|mill-work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g;
-  const millingOps = count(millingRegex);
-  window.detected = {
-    holes: count(/\b(drill|hole|thru|through)\b/g),
-    threads: count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) + uniqueThreadSizes.length,
-    threadSize: uniqueThreadSizes.join(", "),
-    tpi: (lower.match(/\b\d+\s*tpi\b/g) || []).join(", "),
-    slots: count(/\b(slot|slt|profile|cut)\b/g),
-    pockets: count(/\b(pocket|cavity|remove|clear)\b/g),
-    keyways: count(/\b(keyway|key seat)\b/g),
-    flats: count(/\bflat(s)?\b/g),
-    grooves: count(/\b(groove|undercut)\b/g),
-    chamfers: count(/\bchamfer(s)?\b/g),
-    pin: has(/\b(pin|external thread|od thread|male thread)\b/),
-    box: has(/\b(box|internal thread|id thread|female thread|tap|unc|unf)\b/),
-    acme: hasAcme,
-    stub: hasStub,
-    stubAcme: hasStubAcme,
-    tightTol: has(/\.\s*001\b|±\s*0*\.0*01\b/),
-    veryTightTol: has(/\.\s*0005\b|±\s*0*\.0*005\b/),
-    deepFeatures: has(/\bdeep\b/),
-    multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/)
-  };
-  window.millingOps = millingOps;
-  calculate();
-};
-function calculate() {
-  if (!fileName) return;
-  const d = window.detected;
-  const holes = d.holes || 0;
-  const threads = d.threads || 0;
-  const slots = d.slots || 0;
-  const pockets = d.pockets || 0;
-  const keyways = d.keyways || 0;
-  const flats = d.flats || 0;
-  const qty = +document.getElementById("qty").value;
-  const matCost = +document.getElementById("matCost").value;
-  const od = +document.getElementById("od").value;
-  const id = +document.getElementById("id").value;
-  const len = +document.getElementById("length").value;
-  let lathe = 0.25;
-  lathe += volumeRemoved(od, id, len) * 0.02;
-  lathe += threads * 0.08;
-  if (d.acme) lathe += 0.75;
-  if (d.stub) lathe += 0.35;
-  if (d.pin) lathe += 0.25;
-  if (d.box) lathe += 0.35;
-  if (d.stubAcme) lathe += 0.5;
-  lathe += d.grooves * 0.05;
-  lathe += d.chamfers * 0.02;
-  if (d.tightTol) lathe += 0.25;
-  if (d.veryTightTol) lathe += 0.5;
-  if (d.multiOp) lathe += 0.4;
-  let mill = 0.4;
-  mill += holes * 0.04;
-  mill += slots * 0.12;
-  mill += pockets * 0.15;
-  mill += keyways * 0.08;
-  mill += flats * 0.05;
-  mill += (window.millingOps || 0) * 0.15;
-  if (d.deepFeatures) mill += 0.3;
-  if (d.tightTol) mill += 0.2;
-  if (d.veryTightTol) mill += 0.4;
-  if (d.multiOp) mill += 0.5;
-  let prog = 0.8;
-  prog += threads * 0.1;
-  prog += slots * 0.05;
-  prog += pockets * 0.08;
-  if (d.acme) prog += 0.3;
-  if (d.stub) prog += 0.2;
-  if (d.box) prog += 0.2;
-  if (d.multiOp) prog += 0.4;
-  const price =
-    lathe * LATHE_RATE +
-    mill * MILL_RATE +
-    (prog / qty) * PROGRAM_RATE +
-    matCost;
-  const total = price * qty;
-  out.textContent =
-    "File: " + fileName + "\n\n" +
-    "Holes: " + holes + "\n" +
-    "Threads: " + threads + "\n" +
-    "Pin (OD Thread): " + (d.pin ? "YES" : "NO") + "\n" +
-    "Box (ID Thread): " + (d.box ? "YES" : "NO") + "\n" +
-    "Thread Size: " + (d.threadSize || "N/A") + "\n" +
-    "TPI: " + (d.tpi || "N/A") + "\n\n" +
-    "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
-    "Stub: " + (d.stub ? "YES" : "NO") + "\n" +
-    "Stub ACME: " + (d.stubAcme ? "YES" : "NO") + "\n\n" +
-    "Slots: " + slots + "\n" +
-    "Pockets: " + pockets + "\n" +
-    "Keyways: " + keyways + "\n" +
-    "Flats: " + flats + "\n" +
-    "Milling Ops: " + (window.millingOps || 0) + "\n\n" +
-    "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
-    "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
-    "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
-    "Price/Part: $" + price.toFixed(2) + "\n" +
-    "Total: $" + total.toFixed(2);
-}
-document.querySelectorAll("input").forEach((el) => {
-  el.oninput = calculate;
-});
-</script>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CNC Quote System</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      max-width: 900px;
+    }
+    #drop {
+      border: 2px dashed #888;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      background: #fafafa;
+    }
+    .row {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin: 8px 0;
+      align-items: center;
+    }
+    label {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+    }
+    input[type="number"] {
+      width: 90px;
+      padding: 4px;
+    }
+    #file {
+      margin-bottom: 10px;
+      font-weight: bold;
+    }
+    #out {
+      border: 1px solid #000;
+      padding: 10px;
+      background: #f0f0f0;
+      white-space: pre-wrap;
+      min-height: 220px;
+    }
+  </style>
+</head>
+<body>
+  <h2>CNC Quote System</h2>
+  <div id="drop">📄 Drag & Drop PDF Here</div>
+  <div id="file">No file loaded</div>
+  <div class="row">
+    <label>Qty: <input id="qty" type="number" value="10" min="1" /></label>
+    <label>Material Cost (per part $): <input id="matCost" type="number" value="25" step="0.01" /></label>
+  </div>
+  <div class="row">
+    <label>OD: <input id="od" type="number" value="2" step="0.001" /></label>
+    <label>ID: <input id="id" type="number" value="0" step="0.001" /></label>
+    <label>Length: <input id="length" type="number" value="4" step="0.001" /></label>
+  </div>
+  <pre id="out">Drop a PDF to begin.</pre>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+    // Explicitly set worker to avoid silent parse failures
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+    const LATHE_RATE = 110;
+    const MILL_RATE = 130;
+    const PROGRAM_RATE = 120;
+    let fileName = "";
+    let detected = null;
+    let millingOps = 0;
+    function volumeRemoved(od, id, len) {
+      const ro = od / 2;
+      const ri = id / 2;
+      return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
+    }
+    const drop = document.getElementById("drop");
+    const out = document.getElementById("out");
+    const fileDiv = document.getElementById("file");
+    drop.ondragover = (e) => e.preventDefault();
+    drop.ondragenter = (e) => e.preventDefault();
+    drop.ondrop = async (e) => {
+      e.preventDefault();
+      try {
+        const file = e.dataTransfer.files[0];
+        if (!file) {
+          out.textContent = "No file dropped.";
+          return;
+        }
+        fileName = file.name;
+        fileDiv.innerText = "Loaded: " + file.name;
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let text = "";
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          text += " " + content.items.map((x) => x.str).join(" ");
+        }
+        if (!text.trim()) {
+          out.textContent =
+            "PDF loaded, but no selectable text found.\nThis is likely an image/scanned PDF (OCR required).";
+          return;
+        }
+        const lower = text
+          .toLowerCase()
+          .replace(/[\u2010-\u2015]/g, "-")
+          .replace(/\s+/g, " ")
+          .trim();
+        const count = (regex) => (lower.match(regex) || []).length;
+        const has = (regex) => regex.test(lower);
+        // Thread formats like: 1-8, 1.5-8, 7/8-9, 1-8 acme
+        const threadSizeRegex =
+          /\b(?:\d+(?:\.\d+)?|\d+\/\d+)-\d+\s*(?:unc|unf|un|acme)?\b/g;
+        const threadMatches = lower.match(threadSizeRegex) || [];
+        const uniqueThreadSizes = [...new Set(threadMatches)];
+        const hasAcme = has(/\bacme\b/);
+        const hasStub = has(/\bstub\b/);
+        const hasStubAcme = has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/);
+        // Includes "millwork" and "mill-work"
+        millingOps = count(
+          /\b(mill|milling|millwork|mill-work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
+        );
+        detected = {
+          holes: count(/\b(drill|hole|thru|through)\b/g),
+          threads:
+            count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) +
+            uniqueThreadSizes.length,
+          threadSize: uniqueThreadSizes.join(", "),
+          tpi: (lower.match(/\b\d+\s*tpi\b/g) || []).join(", "),
+          slots: count(/\b(slot|slt|profile|cut)\b/g),
+          pockets: count(/\b(pocket|cavity|remove|clear)\b/g),
+          keyways: count(/\b(keyway|key seat)\b/g),
+          flats: count(/\bflat(s)?\b/g),
+          grooves: count(/\b(groove|undercut)\b/g),
+          chamfers: count(/\bchamfer(s)?\b/g),
+          pin: has(/\b(pin|external thread|od thread|male thread)\b/),
+          box: has(/\b(box|internal thread|id thread|female thread|tap|unc|unf)\b/),
+          acme: hasAcme,
+          stub: hasStub,
+          stubAcme: hasStubAcme,
+          tightTol: has(/\.\s*001\b|±\s*0*\.0*01\b/),
+          veryTightTol: has(/\.\s*0005\b|±\s*0*\.0*005\b/),
+          deepFeatures: has(/\bdeep\b/),
+          multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/)
+        };
+        calculate();
+      } catch (err) {
+        console.error(err);
+        out.textContent = "PDF parse error: " + (err && err.message ? err.message : String(err));
+      }
+    };
+    function calculate() {
+      if (!fileName || !detected) {
+        return;
+      }
+      const d = detected;
+      const holes = d.holes || 0;
+      const threads = d.threads || 0;
+      const slots = d.slots || 0;
+      const pockets = d.pockets || 0;
+      const keyways = d.keyways || 0;
+      const flats = d.flats || 0;
+      const qty = Math.max(1, +document.getElementById("qty").value || 1);
+      const matCost = +document.getElementById("matCost").value || 0;
+      const od = +document.getElementById("od").value || 0;
+      const id = +document.getElementById("id").value || 0;
+      const len = +document.getElementById("length").value || 0;
+      // LATHE
+      let lathe = 0.25;
+      lathe += volumeRemoved(od, id, len) * 0.02;
+      lathe += threads * 0.08;
+      if (d.acme) lathe += 0.75;
+      if (d.stub) lathe += 0.35;
+      if (d.pin) lathe += 0.25;
+      if (d.box) lathe += 0.35;
+      if (d.stubAcme) lathe += 0.5;
+      lathe += d.grooves * 0.05;
+      lathe += d.chamfers * 0.02;
+      if (d.tightTol) lathe += 0.25;
+      if (d.veryTightTol) lathe += 0.5;
+      if (d.multiOp) lathe += 0.4;
+      // MILL
+      let mill = 0.4;
+      mill += holes * 0.04;
+      mill += slots * 0.12;
+      mill += pockets * 0.15;
+      mill += keyways * 0.08;
+      mill += flats * 0.05;
+      mill += millingOps * 0.15;
+      if (d.deepFeatures) mill += 0.3;
+      if (d.tightTol) mill += 0.2;
+      if (d.veryTightTol) mill += 0.4;
+      if (d.multiOp) mill += 0.5;
+      // PROGRAM
+      let prog = 0.8;
+      prog += threads * 0.1;
+      prog += slots * 0.05;
+      prog += pockets * 0.08;
+      if (d.acme) prog += 0.3;
+      if (d.stub) prog += 0.2;
+      if (d.box) prog += 0.2;
+      if (d.multiOp) prog += 0.4;
+      const price =
+        lathe * LATHE_RATE +
+        mill * MILL_RATE +
+        (prog / qty) * PROGRAM_RATE +
+        matCost;
+      const total = price * qty;
+      out.textContent =
+        "File: " + fileName + "\n\n" +
+        "Holes: " + holes + "\n" +
+        "Threads: " + threads + "\n" +
+        "Pin (OD Thread): " + (d.pin ? "YES" : "NO") + "\n" +
+        "Box (ID Thread): " + (d.box ? "YES" : "NO") + "\n" +
+        "Thread Size: " + (d.threadSize || "N/A") + "\n" +
+        "TPI: " + (d.tpi || "N/A") + "\n\n" +
+        "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
+        "Stub: " + (d.stub ? "YES" : "NO") + "\n" +
+        "Stub ACME: " + (d.stubAcme ? "YES" : "NO") + "\n\n" +
+        "Slots: " + slots + "\n" +
+        "Pockets: " + pockets + "\n" +
+        "Keyways: " + keyways + "\n" +
+        "Flats: " + flats + "\n" +
+        "Milling Ops: " + millingOps + "\n\n" +
+        "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
+        "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
+        "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
+        "Price/Part: $" + price.toFixed(2) + "\n" +
+        "Total: $" + total.toFixed(2);
+    }
+    document.querySelectorAll("input").forEach((el) => {
+      el.addEventListener("input", calculate);
+    });
+  </script>
+</body>
+</html>
