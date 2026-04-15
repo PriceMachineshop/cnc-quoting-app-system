@@ -72,13 +72,13 @@ drop.ondrop = async (e) => {
     text += content.items.map(i => i.str).join(" ");
   }
 
-  const lower = text.toLowerCase();
+  // 🔥 FIX: normalize broken PDF text
+  const lower = text.toLowerCase().replace(/\s+/g, " ");
 
   function count(regex){
     return (lower.match(regex) || []).length;
   }
 
-  // 🔥 THREAD REGEX (NOW HANDLES FRACTIONS + ACME)
   const threadRegex = /(\d+\s*-\s*\d+\/\d+|\d*\.?\d+\s*-\s*\d+)\s*(unc|unf|un|acme|stub|rd)?/g;
 
   window.detected = {
@@ -89,8 +89,8 @@ drop.ondrop = async (e) => {
     threadSize: (lower.match(threadRegex) || []).join(", "),
     tpi: (lower.match(/\d+\s*tpi|\d+\s*rd/g) || []).join(", "),
 
-    // 🔥 FEATURE DETECTION
-    slots: count(/slot|slt|obround|radius|r\./g),
+    // 🔥 BETTER FEATURE DETECTION
+    slots: count(/slot|slt|obround/g),
     pockets: count(/pocket|cavity|counterbore|c'bore|spotface/g),
     keyways: count(/keyway|key seat|key/g),
     flats: count(/flat/g),
@@ -98,18 +98,19 @@ drop.ondrop = async (e) => {
     grooves: count(/groove|undercut/g),
     chamfers: count(/chamfer/g),
 
-    // 🔥 THREAD TYPES
-    acme: /acme/.test(lower),
-    stub: /stub/.test(lower),
-    stubAcme: /stub\s*acme|acme\s*stub/.test(lower),
+    // 🔥 FIXED THREAD DETECTION
+    acme: lower.includes("acme"),
+    stub: lower.includes("stub"),
+    stubAcme: lower.includes("stub") && lower.includes("acme"),
 
     // 🔥 PIN / BOX
     pin: /pin|external|od thread/.test(lower),
     box: /box|internal|id thread|tap|unc|unf/.test(lower),
 
-    // 🔥 SMART FEATURE DETECTION
+    // 🔥 SMART GEOMETRY DETECTION
     patternCount: count(/\d+\s*plcs/g),
     slotLike: count(/radius|r\s*\.\d+/g),
+    profileDims: count(/\d+\.\d{3}/g),
 
     tightTol: lower.includes(".001"),
     veryTightTol: lower.includes(".0005"),
@@ -167,7 +168,7 @@ function calculate(){
     lathe += volumeRemoved(od,id,len) * 0.02;
     lathe += threads * 0.08;
 
-    // 🔥 THREAD LOGIC
+    // 🔥 FIXED THREAD LOGIC
     if(d.stubAcme){
       lathe += 1.1;
     } else {
@@ -192,14 +193,15 @@ function calculate(){
   let mill = 0;
 
   const hasMill =
-  holes > 0 ||
-  slots > 0 ||
-  pockets > 0 ||
-  keyways > 0 ||
-  flats > 0 ||
-  (window.millingOps > 0) ||
-  d.patternCount > 0 ||
-  d.slotLike > 0;   // ← LOWERED THRESHOLD
+    holes > 0 ||
+    slots > 0 ||
+    pockets > 0 ||
+    keyways > 0 ||
+    flats > 0 ||
+    (window.millingOps > 0) ||
+    d.patternCount > 0 ||
+    d.slotLike > 0 ||
+    d.profileDims > 15;   // 🔥 CRITICAL FIX
 
   if (hasMill) {
     mill = 0.4;
@@ -214,6 +216,11 @@ function calculate(){
     mill += d.patternCount * 0.12;
     mill += d.slotLike * 0.05;
     mill += d.profileDims * 0.02;
+
+    // 🔥 extra boost for real slot geometry
+    if(d.slotLike > 5 && d.patternCount > 0){
+      mill += 0.6;
+    }
 
     if(d.deepFeatures) mill += 0.3;
     if(d.tightTol) mill += 0.2;
