@@ -190,9 +190,6 @@
         /\b(?:\d+(?:\.\d+)?|\d+\/\d+)-\d+\s*(?:unc|unf|un|acme)?\b/g;
       const threadMatches = text.match(threadSizeRegex) || [];
       const uniqueThreadSizes = [...new Set(threadMatches)];
-      const hasAcme = has(/\bacme\b/);
-      const hasStub = has(/\bstub\b/);
-      const hasStubAcme = has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/);
       millingOps = count(
         /\b(mill|milling|mill[-\s]*work|profile|slot|oblong|window|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
       );
@@ -210,9 +207,9 @@
         chamfers: count(/\bchamfer(s)?\b/g),
         pin: has(/\b(pin|external thread|od thread|male thread)\b/),
         box: has(/\b(box|internal thread|id thread|female thread|tap|unc|unf)\b/),
-        acme: hasAcme,
-        stub: hasStub,
-        stubAcme: hasStubAcme,
+        acme: has(/\bacme\b/),
+        stub: has(/\bstub\b/),
+        stubAcme: has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/),
         tightTol: has(/\.\s*001\b|±\s*0*\.0*01\b/),
         veryTightTol: has(/\.\s*0005\b|±\s*0*\.0*005\b/),
         deepFeatures: has(/\bdeep\b/),
@@ -299,9 +296,39 @@
         "Total: $" + total.toFixed(2);
       updateRawPreview();
     }
+    function looksLikePdfHeader(arrayBuffer) {
+      if (!arrayBuffer || arrayBuffer.byteLength < 5) return false;
+      const bytes = new Uint8Array(arrayBuffer.slice(0, 5));
+      return String.fromCharCode(...bytes) === "%PDF-";
+    }
+    function getDroppedFiles(dataTransfer) {
+      const files = [];
+      if (dataTransfer?.items?.length) {
+        for (const item of dataTransfer.items) {
+          if (item.kind === "file") {
+            const f = item.getAsFile();
+            if (f) files.push(f);
+          }
+        }
+      }
+      if (dataTransfer?.files?.length) {
+        for (const f of dataTransfer.files) files.push(f);
+      }
+      return files;
+    }
     async function processFile(file) {
       try {
         if (!file) return;
+        // Outlook/email sometimes gives a 0-byte placeholder.
+        if (!file.size || file.size === 0) {
+          out.textContent =
+            "This email drag provided an empty attachment placeholder (0 bytes).\n" +
+            "Try one of these:\n" +
+            "1) Drag the attachment from email preview/download panel (not message body)\n" +
+            "2) Click the drop area and pick the attachment from Downloads\n" +
+            "3) Copy attachment and press Ctrl+V here";
+          return;
+        }
         fileName = file.name || "Email Attachment.pdf";
         fileDiv.textContent = "Loaded: " + fileName;
         out.textContent = "Reading PDF...";
@@ -310,13 +337,10 @@
         lastCombinedText = "";
         updateRawPreview();
         const arrayBuffer = await file.arrayBuffer();
-        // Accept attachment even if filename/type is odd (email drag cases).
-        const bytes = new Uint8Array(arrayBuffer.slice(0, 5));
-        const header = String.fromCharCode(...bytes);
         const looksLikePdf =
           file.type === "application/pdf" ||
           /\.pdf$/i.test(file.name || "") ||
-          header === "%PDF-";
+          looksLikePdfHeader(arrayBuffer);
         if (!looksLikePdf) {
           out.textContent = "That item is not a PDF. Drag a PDF attachment or file.";
           return;
@@ -340,33 +364,17 @@
         out.textContent = "PDF parse error: " + (err && err.message ? err.message : String(err));
       }
     }
-    function getFirstDroppedFile(dataTransfer) {
-      if (!dataTransfer) return null;
-      // Prefer DataTransferItemList (webmail/Outlook drag source).
-      if (dataTransfer.items && dataTransfer.items.length) {
-        for (const item of dataTransfer.items) {
-          if (item.kind === "file") {
-            const f = item.getAsFile();
-            if (f) return f;
-          }
-        }
-      }
-      // Fallback to FileList.
-      if (dataTransfer.files && dataTransfer.files.length) {
-        return dataTransfer.files[0];
-      }
-      return null;
-    }
     drop.ondragover = (e) => e.preventDefault();
     drop.ondragenter = (e) => e.preventDefault();
     drop.ondrop = async (e) => {
       e.preventDefault();
-      const file = getFirstDroppedFile(e.dataTransfer);
-      if (!file) {
+      const dropped = getDroppedFiles(e.dataTransfer);
+      const candidate = dropped.find((f) => f && f.size > 0) || dropped[0] || null;
+      if (!candidate) {
         out.textContent = "No file detected. Try dragging the PDF attachment itself.";
         return;
       }
-      await processFile(file);
+      await processFile(candidate);
     };
     drop.onclick = () => picker.click();
     picker.onchange = async (e) => {
