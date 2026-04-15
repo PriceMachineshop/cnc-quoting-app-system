@@ -170,16 +170,19 @@
       const weak = c(/\b(mill|milling|surface)\b/g);
       const negative = c(/\b(turn(ed)?\s*only|lathe\s*only|no\s*milling|turned\s*complete|all turning)\b/g) * 2;
       const setupCues = c(/\b(2nd\s*op|second\s*op|index|indexed|rotate\s*90|4th\s*axis|multiple\s*setups?)\b/g);
-      const slotDimCues =
-        c(/\b\d+\s*x\s*\.?\d+(?:\.\d+)?\s*x\s*\.?\d+(?:\.\d+)?\b/g) +
-        c(/\b\d+\s*x\s*(slot|oblong|window)\b/g);
+      const repeatedXDims = c(/\b\d+\s*x\s*\.?\d+(?:\.\d+)?\s*x\s*\.?\d+(?:\.\d+)?\b/g);
+      const slotDimCues = repeatedXDims + c(/\b\d+\s*x\s*(slot|oblong|window)\b/g);
+      const slotLikeCues = c(/\b(slot|slots|oblong|elongated hole|window|keyway|pocket)\b/g);
       const score = strong + medium + weak + setupCues + Math.min(slotDimCues, 3) - negative;
+      // Safety rule: if OCR/text clearly shows slot-like cues or repeated X dimensions, force millwork YES.
+      const safetyRuleTriggered = slotLikeCues >= 2 || repeatedXDims >= 2;
       const hasMillwork =
         score >= 3 ||
-        c(/\b(slot|oblong|elongated hole|window|keyway|pocket)\b/g) >= 2 ||
-        /\b(milled\s*(feature|surface|area)|requires\s*milling)\b/.test(text);
-      const confidence = score >= 7 ? "HIGH" : score >= 3 ? "MEDIUM" : "LOW";
-      return { score, hasMillwork, confidence };
+        slotLikeCues >= 2 ||
+        /\b(milled\s*(feature|surface|area)|requires\s*milling)\b/.test(text) ||
+        safetyRuleTriggered;
+      const confidence = score >= 7 ? "HIGH" : score >= 3 ? "MEDIUM" : (safetyRuleTriggered ? "MEDIUM" : "LOW");
+      return { score, hasMillwork, confidence, slotLikeCues, repeatedXDims, safetyRuleTriggered };
     }
     function analyzeFeatures(rawText) {
       const lower = normalizeText(rawText);
@@ -216,7 +219,10 @@
         multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/),
         hasMillwork: mw.hasMillwork,
         millScore: mw.score,
-        millConfidence: mw.confidence
+        millConfidence: mw.confidence,
+        slotLikeCues: mw.slotLikeCues,
+        repeatedXDims: mw.repeatedXDims,
+        safetyRuleTriggered: mw.safetyRuleTriggered
       };
     }
     function calculate() {
@@ -284,6 +290,9 @@
         "Millwork Detected: " + (d.hasMillwork ? "YES" : "NO") + "\n" +
         "Mill Score: " + (d.millScore || 0) + "\n" +
         "Mill Confidence: " + (d.millConfidence || "LOW") + "\n" +
+        "Safety Rule Triggered: " + (d.safetyRuleTriggered ? "YES" : "NO") + "\n" +
+        "Slot-like Cues: " + (d.slotLikeCues || 0) + "\n" +
+        "Repeated X-Dims: " + (d.repeatedXDims || 0) + "\n" +
         "Slots/Slot-like: " + slots + "\n" +
         "Pockets: " + pockets + "\n" +
         "Keyways: " + keyways + "\n" +
@@ -319,7 +328,6 @@
     async function processFile(file) {
       try {
         if (!file) return;
-        // Outlook/email sometimes gives a 0-byte placeholder.
         if (!file.size || file.size === 0) {
           out.textContent =
             "This email drag provided an empty attachment placeholder (0 bytes).\n" +
@@ -382,7 +390,6 @@
       await processFile(file);
       picker.value = "";
     };
-    // Paste support for copied PDF attachments.
     window.addEventListener("paste", async (e) => {
       const items = e.clipboardData && e.clipboardData.items ? e.clipboardData.items : [];
       for (const item of items) {
