@@ -19,10 +19,10 @@
 </head>
 <body>
   <h2>CNC Quote System</h2>
-  <div id="drop">📄 Drag & Drop PDF Here (or click to pick file)</div>
+  <div id="drop">📄 Drag PDF Here (from email, desktop, or click to pick file)</div>
   <input id="picker" type="file" accept="application/pdf" style="display:none" />
   <div id="file">No file loaded</div>
-  <div class="hint">Scanned PDFs use OCR (slower, more robust for prints).</div>
+  <div class="hint">Scanned PDFs use OCR (slower, more robust for prints). Tip: You can drag PDF attachments directly from email.</div>
   <div class="row">
     <label>Qty: <input id="qty" type="number" value="10" min="1" /></label>
     <label>Material Cost/Part ($): <input id="matCost" type="number" value="25" step="0.01" /></label>
@@ -92,7 +92,6 @@
       const ctx = canvas.getContext("2d");
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = img.data;
-      // Contrast stretch + grayscale + threshold.
       for (let i = 0; i < d.length; i += 4) {
         const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
         const boosted = Math.max(0, Math.min(255, (gray - 128) * 1.35 + 128));
@@ -150,7 +149,6 @@
         canvas.height = Math.ceil(viewport.height);
         await page.render({ canvasContext: ctx, viewport }).promise;
         preprocessCanvasForOCR(canvas);
-        // Two OCR modes merged: dense text + sparse callouts.
         const textA = await ocrPage(
           canvas,
           6,
@@ -172,7 +170,6 @@
       const weak = c(/\b(mill|milling|surface)\b/g);
       const negative = c(/\b(turn(ed)?\s*only|lathe\s*only|no\s*milling|turned\s*complete|all turning)\b/g) * 2;
       const setupCues = c(/\b(2nd\s*op|second\s*op|index|indexed|rotate\s*90|4th\s*axis|multiple\s*setups?)\b/g);
-      // Typical slot notation cue: e.g. "3X .375 X 1.125" (kept weak to avoid false positives).
       const slotDimCues =
         c(/\b\d+\s*x\s*\.?\d+(?:\.\d+)?\s*x\s*\.?\d+(?:\.\d+)?\b/g) +
         c(/\b\d+\s*x\s*(slot|oblong|window)\b/g);
@@ -305,11 +302,7 @@
     async function processFile(file) {
       try {
         if (!file) return;
-        if (!/\.pdf$/i.test(file.name)) {
-          out.textContent = "Please load a PDF file.";
-          return;
-        }
-        fileName = file.name;
+        fileName = file.name || "Email Attachment.pdf";
         fileDiv.textContent = "Loaded: " + fileName;
         out.textContent = "Reading PDF...";
         lastPdfText = "";
@@ -317,6 +310,17 @@
         lastCombinedText = "";
         updateRawPreview();
         const arrayBuffer = await file.arrayBuffer();
+        // Accept attachment even if filename/type is odd (email drag cases).
+        const bytes = new Uint8Array(arrayBuffer.slice(0, 5));
+        const header = String.fromCharCode(...bytes);
+        const looksLikePdf =
+          file.type === "application/pdf" ||
+          /\.pdf$/i.test(file.name || "") ||
+          header === "%PDF-";
+        if (!looksLikePdf) {
+          out.textContent = "That item is not a PDF. Drag a PDF attachment or file.";
+          return;
+        }
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         const pdfText = await extractTextFromPdf(pdf);
         const ocrText = await extractTextWithOCR(pdf, "Running OCR for feature detection...");
@@ -336,11 +340,32 @@
         out.textContent = "PDF parse error: " + (err && err.message ? err.message : String(err));
       }
     }
+    function getFirstDroppedFile(dataTransfer) {
+      if (!dataTransfer) return null;
+      // Prefer DataTransferItemList (webmail/Outlook drag source).
+      if (dataTransfer.items && dataTransfer.items.length) {
+        for (const item of dataTransfer.items) {
+          if (item.kind === "file") {
+            const f = item.getAsFile();
+            if (f) return f;
+          }
+        }
+      }
+      // Fallback to FileList.
+      if (dataTransfer.files && dataTransfer.files.length) {
+        return dataTransfer.files[0];
+      }
+      return null;
+    }
     drop.ondragover = (e) => e.preventDefault();
     drop.ondragenter = (e) => e.preventDefault();
     drop.ondrop = async (e) => {
       e.preventDefault();
-      const file = e.dataTransfer.files[0];
+      const file = getFirstDroppedFile(e.dataTransfer);
+      if (!file) {
+        out.textContent = "No file detected. Try dragging the PDF attachment itself.";
+        return;
+      }
       await processFile(file);
     };
     drop.onclick = () => picker.click();
@@ -349,6 +374,19 @@
       await processFile(file);
       picker.value = "";
     };
+    // Paste support for copied PDF attachments.
+    window.addEventListener("paste", async (e) => {
+      const items = e.clipboardData && e.clipboardData.items ? e.clipboardData.items : [];
+      for (const item of items) {
+        if (item.kind === "file") {
+          const file = item.getAsFile();
+          if (file) {
+            await processFile(file);
+            return;
+          }
+        }
+      }
+    });
     document.querySelectorAll("input[type='number']").forEach((el) => {
       el.addEventListener("input", calculate);
     });
