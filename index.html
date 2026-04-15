@@ -46,15 +46,12 @@ function volumeRemoved(od,id,len){
   return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
 }
 
-// ELEMENTS
 const drop = document.getElementById("drop");
 const out = document.getElementById("out");
 const fileDiv = document.getElementById("file");
 
-// DRAG
 drop.ondragover = e => e.preventDefault();
 
-// DROP
 drop.ondrop = async (e) => {
   e.preventDefault();
 
@@ -81,23 +78,18 @@ drop.ondrop = async (e) => {
     return (lower.match(regex) || []).length;
   }
 
-  // 🔥 STRONG THREAD REGEX (handles real prints)
-  const threadRegex = /[ø]?\s*\d*\.?\d+\s*-\s*\d+\s*(unc|unf|un)?-?\d*[ab]?/g;
+  // 🔥 THREAD REGEX (NOW HANDLES FRACTIONS + ACME)
+  const threadRegex = /(\d+\s*-\s*\d+\/\d+|\d*\.?\d+\s*-\s*\d+)\s*(unc|unf|un|acme|stub|rd)?/g;
 
   window.detected = {
 
     holes: count(/drill|hole|thru|through/g),
 
     threads: (lower.match(threadRegex) || []).length,
-    patternCount: count(/\d+\s*plcs/g),
-    slotLike: count(/r\s*\.\d+|radius/g),
-   profileDims: count(/\d+\.\d{3}/g),
-
-   threadSize: (lower.match(threadRegex) || []).join(", "),
-   tpi: (lower.match(/\d+\s*tpi/g) || []).join(", "),
     threadSize: (lower.match(threadRegex) || []).join(", "),
-    tpi: (lower.match(/\d+\s*tpi/g) || []).join(", "),
+    tpi: (lower.match(/\d+\s*tpi|\d+\s*rd/g) || []).join(", "),
 
+    // 🔥 FEATURE DETECTION
     slots: count(/slot|slt|mill|profile|cut/g),
     pockets: count(/pocket|cavity|remove|clear/g),
     keyways: count(/keyway|key seat|key/g),
@@ -106,14 +98,18 @@ drop.ondrop = async (e) => {
     grooves: count(/groove|undercut/g),
     chamfers: count(/chamfer/g),
 
+    // 🔥 THREAD TYPES
     acme: /acme/.test(lower),
     stub: /stub/.test(lower),
+    stubAcme: /stub\s*acme|acme\s*stub/.test(lower),
 
-    // 🔥 catch combined cases like "7.750-4 STUB ACME"
-    stubAcme: /stub\s*acme/.test(lower) || /acme\s*stub/.test(lower),
-
+    // 🔥 PIN / BOX
     pin: /pin|external|od thread/.test(lower),
     box: /box|internal|id thread|tap|unc|unf/.test(lower),
+
+    // 🔥 SMART FEATURE DETECTION
+    patternCount: count(/\d+\s*plcs/g),
+    slotLike: count(/radius|r\s*\.\d+/g),
 
     tightTol: lower.includes(".001"),
     veryTightTol: lower.includes(".0005"),
@@ -127,7 +123,9 @@ drop.ondrop = async (e) => {
   calculate();
 };
 
+// =========================
 // CALC
+// =========================
 function calculate(){
 
   if(!fileName) return;
@@ -136,6 +134,7 @@ function calculate(){
 
   const holes = d.holes || 0;
   const threads = d.threads || 0;
+
   const slots = d.slots || 0;
   const pockets = d.pockets || 0;
   const keyways = d.keyways || 0;
@@ -148,47 +147,12 @@ function calculate(){
   const id = +document.getElementById("id").value;
   const len = +document.getElementById("length").value;
 
-  // ----------------------
-  // LATHE AUTO DETECT
-  // ----------------------
-  const hasLatheWork =
-    threads > 0 ||
-    d.acme ||
-    d.stub ||
-    d.pin ||
-    d.box ||
-    d.grooves > 0 ||
-    d.chamfers > 0 ||
-    id > 0;
-
+  // =========================
+  // LATHE
+  // =========================
   let lathe = 0;
 
-  if (hasLatheWork) {
-    lathe = 0.25;
-
-    lathe += volumeRemoved(od,id,len) * 0.02;
-    lathe += threads * 0.08;
-
-   // THREAD TYPE INTELLIGENCE (FIXED)
-   if(d.stubAcme){
-   lathe += 1.1;   // heavy cut, slow feed, real shop time
-   } else {
-   if(d.acme) lathe += 0.75;
-   if(d.stub) lathe += 0.35;
-   }
-
-    if(d.pin) lathe += 0.25;
-    if(d.box) lathe += 0.35;
-
-    if(d.acme && d.stub) lathe += 0.5;
-
-    lathe += d.grooves * 0.05;
-    lathe += d.chamfers * 0.02;
-
-    if(d.tightTol) lathe += 0.25;
-    if(d.veryTightTol) lathe += 0.5;
-    if(d.multiOp) lathe += 0.4;
-    const hasLathe =
+  const hasLathe =
     threads > 0 ||
     d.acme ||
     d.stub ||
@@ -197,57 +161,63 @@ function calculate(){
     d.chamfers > 0 ||
     volumeRemoved(od,id,len) > 0.1;
 
-    if (!hasLathe) lathe = 0;
+  if (hasLathe) {
+    lathe = 0.25;
+
+    lathe += volumeRemoved(od,id,len) * 0.02;
+    lathe += threads * 0.08;
+
+    // 🔥 THREAD LOGIC
+    if(d.stubAcme){
+      lathe += 1.1;
+    } else {
+      if(d.acme) lathe += 0.75;
+      if(d.stub) lathe += 0.35;
     }
 
-  // ----------------------
-  // MILL AUTO DETECT
-  // ----------------------
-  const hasMillWork =
-    holes > 0 ||
-    slots > 0 ||
-    pockets > 0 ||
-    keyways > 0 ||
-    flats > 0 ||
-    (window.millingOps || 0) > 0;
+    if(d.pin) lathe += 0.25;
+    if(d.box) lathe += 0.35;
 
+    lathe += d.grooves * 0.05;
+    lathe += d.chamfers * 0.02;
+
+    if(d.tightTol) lathe += 0.25;
+    if(d.veryTightTol) lathe += 0.5;
+    if(d.multiOp) lathe += 0.4;
+  }
+
+  // =========================
+  // MILL
+  // =========================
   let mill = 0;
 
-// only turn on mill if features exist
-const hasMill =
-  (window.millingOps > 0) ||
-  d.patternCount > 0 ||
-  d.slotLike > 3;
+  const hasMill =
+    (window.millingOps > 0) ||
+    d.patternCount > 0 ||
+    d.slotLike > 3;
 
-// 👇 THIS FIXES BOTH PROBLEMS
-if (hasMill) {
+  if (hasMill) {
+    mill = 0.4;
 
-  mill = 0.4;
+    mill += holes * 0.04;
+    mill += slots * 0.12;
+    mill += pockets * 0.15;
+    mill += keyways * 0.08;
+    mill += flats * 0.05;
 
-  mill += holes * 0.04;
-  mill += slots * 0.12;
-  mill += pockets * 0.15;
-  mill += keyways * 0.08;
-  mill += flats * 0.05;
+    mill += (window.millingOps || 0) * 0.15;
+    mill += d.patternCount * 0.12;
+    mill += d.slotLike * 0.05;
 
-  mill += (window.millingOps || 0) * 0.15;
+    if(d.deepFeatures) mill += 0.3;
+    if(d.tightTol) mill += 0.2;
+    if(d.veryTightTol) mill += 0.4;
+    if(d.multiOp) mill += 0.5;
+  }
 
-  // 🔥 NEW INTELLIGENCE
-  mill += d.patternCount * 0.12;   // repeated features = slots
-  mill += d.slotLike * 0.05;       // radii/obrounds
-
-  if(d.deepFeatures) mill += 0.3;
-  if(d.tightTol) mill += 0.2;
-  if(d.veryTightTol) mill += 0.4;
-  if(d.multiOp) mill += 0.5;
-
-} else {
-  mill = 0; // 🔥 no ghost charges
-}
-
-  // ----------------------
+  // =========================
   // PROGRAM
-  // ----------------------
+  // =========================
   let prog = 0.8;
 
   prog += threads * 0.1;
@@ -259,9 +229,9 @@ if (hasMill) {
   if(d.box) prog += 0.2;
   if(d.multiOp) prog += 0.4;
 
-  // ----------------------
-  // MATERIAL MARKUP
-  // ----------------------
+  // =========================
+  // MATERIAL
+  // =========================
   const materialWithMarkup = matCost * 1.25;
 
   const price =
@@ -272,34 +242,28 @@ if (hasMill) {
 
   const total = price * qty;
 
+  // =========================
   // OUTPUT
+  // =========================
   out.textContent =
     "File: " + fileName + "\n\n" +
 
-    "Lathe Work: " + (hasLatheWork ? "YES" : "NO") + "\n" +
-    "Mill Work: " + (hasMillWork ? "YES" : "NO") + "\n\n" +
+    "Lathe Work: " + (lathe > 0 ? "YES" : "NO") + "\n" +
+    "Mill Work: " + (mill > 0 ? "YES" : "NO") + "\n\n" +
 
-    "Holes: " + holes + "\n" +
     "Threads: " + threads + "\n" +
-    "Pin (OD Thread): " + (d.pin ? "YES" : "NO") + "\n" +
-    "Box (ID Thread): " + (d.box ? "YES" : "NO") + "\n" +
     "Thread Size: " + (d.threadSize || "N/A") + "\n" +
-    "TPI: " + (d.tpi || "N/A") + "\n\n" +
-
-    "ACME: " + (d.acme ? "YES" : "NO") + "\n" +
-    "Stub: " + (d.stub ? "YES" : "NO") + "\n\n" +
+    "Stub ACME: " + (d.stubAcme ? "YES" : "NO") + "\n\n" +
 
     "Slots: " + slots + "\n" +
     "Pockets: " + pockets + "\n" +
-    "Keyways: " + keyways + "\n" +
-    "Flats: " + flats + "\n" +
     "Milling Ops: " + (window.millingOps || 0) + "\n\n" +
 
     "Lathe Time: " + lathe.toFixed(2) + " hrs\n" +
     "Mill Time: " + mill.toFixed(2) + " hrs\n\n" +
 
-    "Material Cost (Base): $" + matCost.toFixed(2) + "\n" +
-    "Material w/Markup (1.25x): $" + materialWithMarkup.toFixed(2) + "\n\n" +
+    "Material (Base): $" + matCost.toFixed(2) + "\n" +
+    "Material (1.25x): $" + materialWithMarkup.toFixed(2) + "\n\n" +
 
     "Price/Part: $" + price.toFixed(2) + "\n" +
     "Total: $" + total.toFixed(2);
