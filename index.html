@@ -72,25 +72,31 @@ drop.ondrop = async (e) => {
     text += content.items.map(i => i.str).join(" ");
   }
 
-  // 🔥 FIX: normalize broken PDF text
+  // 🔥 normalize ugly PDF text
   const lower = text.toLowerCase().replace(/\s+/g, " ");
 
   function count(regex){
     return (lower.match(regex) || []).length;
   }
 
-  const threadRegex = /(\d+\s*-\s*\d+\/\d+|\d*\.?\d+\s*-\s*\d+)\s*(unc|unf|un|acme|stub|rd)?/g;
+  // =========================
+  // 🔥 THREAD FIX (REAL WORLD SAFE)
+  // =========================
+  const threadMatches = lower.match(/\d*\.?\d+\s*-\s*\d+/g) || [];
+
+  const hasAcme = /a\s*c\s*m\s*e/.test(lower);
+  const hasStub = /s\s*t\s*u\s*b/.test(lower);
 
   window.detected = {
 
     holes: count(/drill|hole|thru|through/g),
 
-    threads: (lower.match(threadRegex) || []).length,
-    threadSize: (lower.match(threadRegex) || []).join(", "),
+    threads: threadMatches.length,
+    threadSize: threadMatches.join(", "),
     tpi: (lower.match(/\d+\s*tpi|\d+\s*rd/g) || []).join(", "),
 
-    // 🔥 BETTER FEATURE DETECTION
-    slots: count(/slot|slt|obround/g),
+    // 🔥 FEATURE DETECTION (REAL PRINTS)
+    slots: count(/slot|slt|obround|radius|r\./g),
     pockets: count(/pocket|cavity|counterbore|c'bore|spotface/g),
     keyways: count(/keyway|key seat|key/g),
     flats: count(/flat/g),
@@ -98,16 +104,16 @@ drop.ondrop = async (e) => {
     grooves: count(/groove|undercut/g),
     chamfers: count(/chamfer/g),
 
-    // 🔥 FIXED THREAD DETECTION
-    acme: lower.includes("acme"),
-    stub: lower.includes("stub"),
-    stubAcme: lower.includes("stub") && lower.includes("acme"),
+    // 🔥 THREAD TYPES (FIXED)
+    acme: hasAcme,
+    stub: hasStub,
+    stubAcme: hasAcme && hasStub,
 
     // 🔥 PIN / BOX
     pin: /pin|external|od thread/.test(lower),
     box: /box|internal|id thread|tap|unc|unf/.test(lower),
 
-    // 🔥 SMART GEOMETRY DETECTION
+    // 🔥 GEOMETRY INTELLIGENCE
     patternCount: count(/\d+\s*plcs/g),
     slotLike: count(/radius|r\s*\.\d+/g),
     profileDims: count(/\d+\.\d{3}/g),
@@ -168,7 +174,7 @@ function calculate(){
     lathe += volumeRemoved(od,id,len) * 0.02;
     lathe += threads * 0.08;
 
-    // 🔥 FIXED THREAD LOGIC
+    // 🔥 THREAD COST LOGIC
     if(d.stubAcme){
       lathe += 1.1;
     } else {
@@ -188,7 +194,7 @@ function calculate(){
   }
 
   // =========================
-  // MILL
+  // MILL (FIXED LOGIC)
   // =========================
   let mill = 0;
 
@@ -198,12 +204,13 @@ function calculate(){
     pockets > 0 ||
     keyways > 0 ||
     flats > 0 ||
-    (window.millingOps > 0) ||
     d.patternCount > 0 ||
     d.slotLike > 0 ||
-    d.profileDims > 15;   // 🔥 CRITICAL FIX
+    d.profileDims > 5 ||
+    (d.patternCount > 0 && d.slotLike > 0);
 
   if (hasMill) {
+
     mill = 0.4;
 
     mill += holes * 0.04;
@@ -217,8 +224,12 @@ function calculate(){
     mill += d.slotLike * 0.05;
     mill += d.profileDims * 0.02;
 
-    // 🔥 extra boost for real slot geometry
-    if(d.slotLike > 5 && d.patternCount > 0){
+    // 🔥 REAL PRINT BOOST
+    if (d.patternCount >= 2 && d.slotLike >= 2) {
+      mill += 1.0;
+    }
+
+    if (d.profileDims > 8) {
       mill += 0.6;
     }
 
