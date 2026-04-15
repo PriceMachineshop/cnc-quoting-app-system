@@ -71,6 +71,8 @@
         .toLowerCase()
         .replace(/[\u2010-\u2015]/g, "-")
         .replace(/[|]/g, " ")
+        .replace(/[×✕✖*]/g, "x")
+        .replace(/,/g, ".")
         .replace(/\s+/g, " ")
         .trim();
     }
@@ -80,6 +82,7 @@
         .replace(/\bmi11[-\s]*w[o0]rk\b/g, "millwork")
         .replace(/\bmil[-\s]*w[o0]rk\b/g, "millwork")
         .replace(/\bmill[-\s]*wrk\b/g, "millwork")
+        .replace(/\bslo[t7]\b/g, "slot")
         .replace(/\bsl[o0]t\b/g, "slot")
         .replace(/\bs\s*l\s*o\s*t\b/g, "slot")
         .replace(/\bslt\b/g, "slot")
@@ -170,19 +173,33 @@
       const weak = c(/\b(mill|milling|surface)\b/g);
       const negative = c(/\b(turn(ed)?\s*only|lathe\s*only|no\s*milling|turned\s*complete|all turning)\b/g) * 2;
       const setupCues = c(/\b(2nd\s*op|second\s*op|index|indexed|rotate\s*90|4th\s*axis|multiple\s*setups?)\b/g);
-      const repeatedXDims = c(/\b\d+\s*x\s*\.?\d+(?:\.\d+)?\s*x\s*\.?\d+(?:\.\d+)?\b/g);
-      const slotDimCues = repeatedXDims + c(/\b\d+\s*x\s*(slot|oblong|window)\b/g);
+      const repeated3TermDims = c(/\b\d+\s*x\s*\.?\d+(?:\.\d+)?\s*x\s*\.?\d+(?:\.\d+)?\b/g);
+      const repeated2TermDims = c(/\b\d+\s*x\s*\.?\d+(?:\.\d+)?\b/g);
+      const qtyCues = c(/\b(\d+\s*x|x\s*\d+|plcs?|places?|typ|eq\s*sp)\b/g);
       const slotLikeCues = c(/\b(slot|slots|oblong|elongated hole|window|keyway|pocket)\b/g);
-      const score = strong + medium + weak + setupCues + Math.min(slotDimCues, 3) - negative;
-      // Safety rule: if OCR/text clearly shows slot-like cues or repeated X dimensions, force millwork YES.
-      const safetyRuleTriggered = slotLikeCues >= 2 || repeatedXDims >= 2;
+      const score =
+        strong + medium + weak + setupCues +
+        Math.min(repeated3TermDims, 3) +
+        Math.min(repeated2TermDims >= 4 ? 2 : 0, 2) +
+        Math.min(qtyCues >= 2 ? 2 : 0, 2) -
+        negative;
+      const safetyRuleTriggered =
+        slotLikeCues >= 2 ||
+        repeated3TermDims >= 1 ||
+        (repeated2TermDims >= 4 && qtyCues >= 2 && negative === 0);
       const hasMillwork =
         score >= 3 ||
-        slotLikeCues >= 2 ||
         /\b(milled\s*(feature|surface|area)|requires\s*milling)\b/.test(text) ||
         safetyRuleTriggered;
       const confidence = score >= 7 ? "HIGH" : score >= 3 ? "MEDIUM" : (safetyRuleTriggered ? "MEDIUM" : "LOW");
-      return { score, hasMillwork, confidence, slotLikeCues, repeatedXDims, safetyRuleTriggered };
+      return {
+        score,
+        hasMillwork,
+        confidence,
+        slotLikeCues,
+        repeatedXDims: repeated3TermDims + repeated2TermDims,
+        safetyRuleTriggered
+      };
     }
     function analyzeFeatures(rawText) {
       const lower = normalizeText(rawText);
