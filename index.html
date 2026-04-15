@@ -139,44 +139,76 @@ function calculate(){
   const id = +document.getElementById("id").value;
   const len = +document.getElementById("length").value;
 
-  // LATHE
-  let lathe = 0.25;
+  // ----------------------
+  // LATHE AUTO DETECT
+  // ----------------------
+  const hasLatheWork =
+    threads > 0 ||
+    d.acme ||
+    d.stub ||
+    d.pin ||
+    d.box ||
+    d.grooves > 0 ||
+    d.chamfers > 0 ||
+    id > 0;
 
-  lathe += volumeRemoved(od,id,len) * 0.02;
-  lathe += threads * 0.08;
+  let lathe = 0;
 
-  if(d.acme) lathe += 0.75;
-  if(d.stub) lathe += 0.35;
+  if (hasLatheWork) {
+    lathe = 0.25;
 
-  if(d.pin) lathe += 0.25;
-  if(d.box) lathe += 0.35;
+    lathe += volumeRemoved(od,id,len) * 0.02;
+    lathe += threads * 0.08;
 
-  if(d.acme && d.stub) lathe += 0.5;
+    if(d.acme) lathe += 0.75;
+    if(d.stub) lathe += 0.35;
 
-  lathe += d.grooves * 0.05;
-  lathe += d.chamfers * 0.02;
+    if(d.pin) lathe += 0.25;
+    if(d.box) lathe += 0.35;
 
-  if(d.tightTol) lathe += 0.25;
-  if(d.veryTightTol) lathe += 0.5;
-  if(d.multiOp) lathe += 0.4;
+    if(d.acme && d.stub) lathe += 0.5;
 
-  // MILL
-  let mill = 0.4;
+    lathe += d.grooves * 0.05;
+    lathe += d.chamfers * 0.02;
 
-  mill += holes * 0.04;
-  mill += slots * 0.12;
-  mill += pockets * 0.15;
-  mill += keyways * 0.08;
-  mill += flats * 0.05;
+    if(d.tightTol) lathe += 0.25;
+    if(d.veryTightTol) lathe += 0.5;
+    if(d.multiOp) lathe += 0.4;
+  }
 
-  mill += (window.millingOps || 0) * 0.15;
+  // ----------------------
+  // MILL AUTO DETECT
+  // ----------------------
+  const hasMillWork =
+    holes > 0 ||
+    slots > 0 ||
+    pockets > 0 ||
+    keyways > 0 ||
+    flats > 0 ||
+    (window.millingOps || 0) > 0;
 
-  if(d.deepFeatures) mill += 0.3;
-  if(d.tightTol) mill += 0.2;
-  if(d.veryTightTol) mill += 0.4;
-  if(d.multiOp) mill += 0.5;
+  let mill = 0;
 
+  if (hasMillWork) {
+    mill = 0.4;
+
+    mill += holes * 0.04;
+    mill += slots * 0.12;
+    mill += pockets * 0.15;
+    mill += keyways * 0.08;
+    mill += flats * 0.05;
+
+    mill += (window.millingOps || 0) * 0.15;
+
+    if(d.deepFeatures) mill += 0.3;
+    if(d.tightTol) mill += 0.2;
+    if(d.veryTightTol) mill += 0.4;
+    if(d.multiOp) mill += 0.5;
+  }
+
+  // ----------------------
   // PROGRAM
+  // ----------------------
   let prog = 0.8;
 
   prog += threads * 0.1;
@@ -188,7 +220,9 @@ function calculate(){
   if(d.box) prog += 0.2;
   if(d.multiOp) prog += 0.4;
 
-  // 🔥 MATERIAL MARKUP
+  // ----------------------
+  // MATERIAL MARKUP
+  // ----------------------
   const materialWithMarkup = matCost * 1.25;
 
   const price =
@@ -202,6 +236,9 @@ function calculate(){
   // OUTPUT
   out.textContent =
     "File: " + fileName + "\n\n" +
+
+    "Lathe Work: " + (hasLatheWork ? "YES" : "NO") + "\n" +
+    "Mill Work: " + (hasMillWork ? "YES" : "NO") + "\n\n" +
 
     "Holes: " + holes + "\n" +
     "Threads: " + threads + "\n" +
