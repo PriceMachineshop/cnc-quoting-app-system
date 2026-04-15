@@ -90,8 +90,8 @@ drop.ondrop = async (e) => {
     tpi: (lower.match(/\d+\s*tpi|\d+\s*rd/g) || []).join(", "),
 
     // 🔥 FEATURE DETECTION
-    slots: count(/slot|slt|mill|profile|cut/g),
-    pockets: count(/pocket|cavity|remove|clear/g),
+    slots: count(/slot|slt|obround|radius|r\./g),
+    pockets: count(/pocket|cavity|counterbore|c'bore|spotface/g),
     keyways: count(/keyway|key seat|key/g),
     flats: count(/flat/g),
 
@@ -192,9 +192,14 @@ function calculate(){
   let mill = 0;
 
   const hasMill =
-    (window.millingOps > 0) ||
-    d.patternCount > 0 ||
-    d.slotLike > 3;
+  holes > 0 ||
+  slots > 0 ||
+  pockets > 0 ||
+  keyways > 0 ||
+  flats > 0 ||
+  (window.millingOps > 0) ||
+  d.patternCount > 0 ||
+  d.slotLike > 0;   // ← LOWERED THRESHOLD
 
   if (hasMill) {
     mill = 0.4;
@@ -208,6 +213,7 @@ function calculate(){
     mill += (window.millingOps || 0) * 0.15;
     mill += d.patternCount * 0.12;
     mill += d.slotLike * 0.05;
+    mill += d.profileDims * 0.02;
 
     if(d.deepFeatures) mill += 0.3;
     if(d.tightTol) mill += 0.2;
