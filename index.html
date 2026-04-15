@@ -1,3 +1,11 @@
+Added a Raw Text Preview toggle so you can inspect exactly what was extracted from PDF text + OCR.
+It now shows:
+
+PDF selectable text
+OCR text (if run)
+Combined text used for feature detection
+Here’s the updated full HTML:
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -50,6 +58,19 @@
       font-size: 13px;
       margin-top: 6px;
     }
+    #rawWrap {
+      margin-top: 12px;
+      display: none;
+    }
+    #raw {
+      border: 1px solid #000;
+      padding: 10px;
+      background: #fbfbfb;
+      white-space: pre-wrap;
+      max-height: 360px;
+      overflow: auto;
+      font-size: 12px;
+    }
   </style>
 </head>
 <body>
@@ -67,7 +88,14 @@
     <label>ID: <input id="id" type="number" value="0" step="0.001" /></label>
     <label>Length: <input id="length" type="number" value="4" step="0.001" /></label>
   </div>
+  <div class="row">
+    <label><input id="showRaw" type="checkbox" /> Show raw extracted text</label>
+  </div>
   <pre id="out">Drop a PDF to begin.</pre>
+  <div id="rawWrap">
+    <strong>Raw Text Preview (Debug)</strong>
+    <pre id="raw">No extracted text yet.</pre>
+  </div>
   <!-- PDF.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <!-- OCR -->
@@ -81,10 +109,17 @@
     let fileName = "";
     let detected = null;
     let millingOps = 0;
+    // Debug text buckets
+    let lastPdfText = "";
+    let lastOcrText = "";
+    let lastCombinedText = "";
     const drop = document.getElementById("drop");
     const picker = document.getElementById("picker");
     const out = document.getElementById("out");
     const fileDiv = document.getElementById("file");
+    const showRaw = document.getElementById("showRaw");
+    const rawWrap = document.getElementById("rawWrap");
+    const raw = document.getElementById("raw");
     function volumeRemoved(od, id, len) {
       const ro = od / 2;
       const ri = id / 2;
@@ -97,6 +132,31 @@
         .replace(/\s+/g, " ")
         .trim();
     }
+    function normalizeForOcrKeywords(s) {
+      // Normalize common OCR variants for "millwork"
+      return s
+        .replace(/\bm[i1l]{2}[-\s]*w[o0]rk\b/g, "millwork")
+        .replace(/\bmill[-\s]*w[o0]rk\b/g, "millwork");
+    }
+    function truncateText(s, max = 14000) {
+      if (!s) return "";
+      if (s.length <= max) return s;
+      return s.slice(0, max) + "\n\n[...truncated for display...]";
+    }
+    function updateRawPreview() {
+      if (!showRaw.checked) {
+        rawWrap.style.display = "none";
+        return;
+      }
+      rawWrap.style.display = "block";
+      raw.textContent =
+        "=== PDF TEXT (selectable) ===\n" +
+        (truncateText(lastPdfText) || "(none)") +
+        "\n\n=== OCR TEXT ===\n" +
+        (truncateText(lastOcrText) || "(none)") +
+        "\n\n=== COMBINED TEXT USED FOR ANALYSIS ===\n" +
+        (truncateText(lastCombinedText) || "(none)");
+    }
     async function extractTextFromPdf(pdf) {
       let text = "";
       for (let i = 1; i <= pdf.numPages; i++) {
@@ -106,7 +166,7 @@
       }
       return text;
     }
-    async function extractTextWithOCR(pdf) {
+    async function extractTextWithOCR(pdf, statusPrefix = "Running OCR...") {
       let ocrText = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
@@ -120,8 +180,8 @@
           logger: (m) => {
             if (m.status === "recognizing text") {
               out.textContent =
-                `No selectable text found. Running OCR...\n` +
-                `Page ${i}/${pdf.numPages} - ${Math.round(m.progress * 100)}%`;
+                statusPrefix + "\n" +
+                "Page " + i + "/" + pdf.numPages + " - " + Math.round(m.progress * 100) + "%";
             }
           }
         });
@@ -131,24 +191,25 @@
     }
     function analyzeFeatures(rawText) {
       const lower = normalizeText(rawText);
-      const count = (regex) => (lower.match(regex) || []).length;
-      const has = (regex) => regex.test(lower);
+      const text = normalizeForOcrKeywords(lower);
+      const count = (regex) => (text.match(regex) || []).length;
+      const has = (regex) => regex.test(text);
       const threadSizeRegex =
         /\b(?:\d+(?:\.\d+)?|\d+\/\d+)-\d+\s*(?:unc|unf|un|acme)?\b/g;
-      const threadMatches = lower.match(threadSizeRegex) || [];
+      const threadMatches = text.match(threadSizeRegex) || [];
       const uniqueThreadSizes = [...new Set(threadMatches)];
       const hasAcme = has(/\bacme\b/);
       const hasStub = has(/\bstub\b/);
       const hasStubAcme = has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/);
       millingOps = count(
-        /\b(mill|milling|millwork|mill-work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
+        /\b(mill|milling|mill[-\s]*work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
       );
       detected = {
         holes: count(/\b(drill|hole|thru|through)\b/g),
         threads:
           count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) + uniqueThreadSizes.length,
         threadSize: uniqueThreadSizes.join(", "),
-        tpi: (lower.match(/\b\d+\s*tpi\b/g) || []).join(", "),
+        tpi: (text.match(/\b\d+\s*tpi\b/g) || []).join(", "),
         slots: count(/\b(slot|slt|profile|cut)\b/g),
         pockets: count(/\b(pocket|cavity|remove|clear)\b/g),
         keyways: count(/\b(keyway|key seat)\b/g),
@@ -165,7 +226,6 @@
         deepFeatures: has(/\bdeep\b/),
         multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/)
       };
-      // Only quote milling when true millwork features exist
       detected.hasMillwork =
         millingOps > 0 ||
         detected.slots > 0 ||
@@ -201,7 +261,7 @@
       if (d.tightTol) lathe += 0.25;
       if (d.veryTightTol) lathe += 0.5;
       if (d.multiOp) lathe += 0.4;
-      // Mill - only if millwork is detected
+      // Mill
       let mill = 0;
       if (d.hasMillwork) {
         mill = 0.4;
@@ -253,6 +313,7 @@
         "Material Cost: $" + matCost.toFixed(2) + "\n\n" +
         "Price/Part: $" + price.toFixed(2) + "\n" +
         "Total: $" + total.toFixed(2);
+      updateRawPreview();
     }
     async function processFile(file) {
       try {
@@ -264,17 +325,37 @@
         fileName = file.name;
         fileDiv.textContent = "Loaded: " + fileName;
         out.textContent = "Reading PDF...";
+        // Reset debug text each run
+        lastPdfText = "";
+        lastOcrText = "";
+        lastCombinedText = "";
+        updateRawPreview();
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         let text = await extractTextFromPdf(pdf);
+        lastPdfText = text;
+        // If PDF has no embedded text at all, OCR everything.
         if (!text.trim()) {
-          text = await extractTextWithOCR(pdf);
+          const ocrAll = await extractTextWithOCR(pdf, "No selectable text found. Running OCR...");
+          text = ocrAll;
+          lastOcrText = ocrAll;
         }
         if (!text.trim()) {
           out.textContent = "Could not extract text, even with OCR. Try a clearer scan.";
+          updateRawPreview();
           return;
         }
         analyzeFeatures(text);
+        // If no millwork is found initially, verify with OCR and merge.
+        if (!detected.hasMillwork) {
+          const ocrText = await extractTextWithOCR(pdf, "No millwork detected in PDF text. Verifying with OCR...");
+          if (ocrText.trim()) {
+            lastOcrText = (lastOcrText + " " + ocrText).trim();
+            text = (text + " " + ocrText).trim();
+            analyzeFeatures(text);
+          }
+        }
+        lastCombinedText = text;
         calculate();
       } catch (err) {
         console.error(err);
@@ -300,6 +381,8 @@
     document.querySelectorAll("input[type='number']").forEach((el) => {
       el.addEventListener("input", calculate);
     });
+    // Toggle raw preview
+    showRaw.addEventListener("change", updateRawPreview);
   </script>
 </body>
 </html>
