@@ -89,6 +89,12 @@ drop.ondrop = async (e) => {
     holes: count(/drill|hole|thru|through/g),
 
     threads: (lower.match(threadRegex) || []).length,
+    patternCount: count(/\d+\s*plcs/g),
+    slotLike: count(/r\s*\.\d+|radius/g),
+   profileDims: count(/\d+\.\d{3}/g),
+
+   threadSize: (lower.match(threadRegex) || []).join(", "),
+   tpi: (lower.match(/\d+\s*tpi/g) || []).join(", "),
     threadSize: (lower.match(threadRegex) || []).join(", "),
     tpi: (lower.match(/\d+\s*tpi/g) || []).join(", "),
 
@@ -100,8 +106,11 @@ drop.ondrop = async (e) => {
     grooves: count(/groove|undercut/g),
     chamfers: count(/chamfer/g),
 
-    acme: lower.includes("acme"),
-    stub: lower.includes("stub"),
+    acme: /acme/.test(lower),
+    stub: /stub/.test(lower),
+
+    // 🔥 catch combined cases like "7.750-4 STUB ACME"
+    stubAcme: /stub\s*acme/.test(lower) || /acme\s*stub/.test(lower),
 
     pin: /pin|external|od thread/.test(lower),
     box: /box|internal|id thread|tap|unc|unf/.test(lower),
@@ -160,8 +169,13 @@ function calculate(){
     lathe += volumeRemoved(od,id,len) * 0.02;
     lathe += threads * 0.08;
 
-    if(d.acme) lathe += 0.75;
-    if(d.stub) lathe += 0.35;
+   // THREAD TYPE INTELLIGENCE (FIXED)
+   if(d.stubAcme){
+   lathe += 1.1;   // heavy cut, slow feed, real shop time
+   } else {
+   if(d.acme) lathe += 0.75;
+   if(d.stub) lathe += 0.35;
+   }
 
     if(d.pin) lathe += 0.25;
     if(d.box) lathe += 0.35;
@@ -174,7 +188,17 @@ function calculate(){
     if(d.tightTol) lathe += 0.25;
     if(d.veryTightTol) lathe += 0.5;
     if(d.multiOp) lathe += 0.4;
-  }
+    const hasLathe =
+    threads > 0 ||
+    d.acme ||
+    d.stub ||
+    d.stubAcme ||
+    d.grooves > 0 ||
+    d.chamfers > 0 ||
+    volumeRemoved(od,id,len) > 0.1;
+
+    if (!hasLathe) lathe = 0;
+    }
 
   // ----------------------
   // MILL AUTO DETECT
@@ -189,22 +213,37 @@ function calculate(){
 
   let mill = 0;
 
-  if (hasMillWork) {
-    mill = 0.4;
+// only turn on mill if features exist
+const hasMill =
+  (window.millingOps > 0) ||
+  d.patternCount > 0 ||
+  d.slotLike > 3;
 
-    mill += holes * 0.04;
-    mill += slots * 0.12;
-    mill += pockets * 0.15;
-    mill += keyways * 0.08;
-    mill += flats * 0.05;
+// 👇 THIS FIXES BOTH PROBLEMS
+if (hasMill) {
 
-    mill += (window.millingOps || 0) * 0.15;
+  mill = 0.4;
 
-    if(d.deepFeatures) mill += 0.3;
-    if(d.tightTol) mill += 0.2;
-    if(d.veryTightTol) mill += 0.4;
-    if(d.multiOp) mill += 0.5;
-  }
+  mill += holes * 0.04;
+  mill += slots * 0.12;
+  mill += pockets * 0.15;
+  mill += keyways * 0.08;
+  mill += flats * 0.05;
+
+  mill += (window.millingOps || 0) * 0.15;
+
+  // 🔥 NEW INTELLIGENCE
+  mill += d.patternCount * 0.12;   // repeated features = slots
+  mill += d.slotLike * 0.05;       // radii/obrounds
+
+  if(d.deepFeatures) mill += 0.3;
+  if(d.tightTol) mill += 0.2;
+  if(d.veryTightTol) mill += 0.4;
+  if(d.multiOp) mill += 0.5;
+
+} else {
+  mill = 0; // 🔥 no ghost charges
+}
 
   // ----------------------
   // PROGRAM
