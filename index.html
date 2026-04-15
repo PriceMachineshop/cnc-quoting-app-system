@@ -45,9 +45,9 @@
   <script>
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
-    const LATHE_RATE = 110;
-    const MILL_RATE = 130;
-    const PROGRAM_RATE = 120;
+    const LATHE_RATE = 120;
+    const MILL_RATE = 120;
+    const PROGRAM_RATE = 100;
     let fileName = "";
     let detected = null;
     let millingOps = 0;
@@ -82,20 +82,11 @@
         .replace(/\bmill[-\s]*wrk\b/g, "millwork")
         .replace(/\bmilling[-\s]*work\b/g, "millwork");
     }
-    function hasMillworkApprox(text) {
-      const t = normalizeForOcrKeywords(normalizeText(text));
-      // Direct/regex forms
-      if (/\b(millwork|mill[-\s]*work|milling|milling[-\s]*op(?:eration)?s?)\b/.test(t)) return true;
-      if (/\b(mill|milling)\b/.test(t)) return true;
-      // OCR-rough variants like "mil wrk", "mll work"
-      if (/\b(m[i1l]{1,3}|mll|mil)\s*(w[o0]?rk|wrk)\b/.test(t)) return true;
-      return false;
-    }
     function preprocessCanvasForOCR(canvas) {
       const ctx = canvas.getContext("2d");
       const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
       const d = img.data;
-      // Simple grayscale + threshold (helps blueprint/scanned prints)
+      // Grayscale + threshold to improve OCR on scans/prints.
       for (let i = 0; i < d.length; i += 4) {
         const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
         const bw = gray > 170 ? 255 : 0;
@@ -134,7 +125,7 @@
       let ocrText = "";
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
-        const viewport = page.getViewport({ scale: 3.0 }); // higher scale improves OCR
+        const viewport = page.getViewport({ scale: 3.0 });
         const canvas = document.createElement("canvas");
         const ctx = canvas.getContext("2d");
         canvas.width = Math.ceil(viewport.width);
@@ -155,6 +146,28 @@
       }
       return ocrText;
     }
+    function millworkScore(text) {
+      const c = (re) => (text.match(re) || []).length;
+      // Strong indicators.
+      const strong = c(/\b(slot|keyway|pocket|flat(s)?|cross[-\s]*hole|milled)\b/g) * 3;
+      // Medium indicators.
+      const medium = c(/\b(profile|contour|face\s*mill|machined\s*surface|cavity)\b/g) * 2;
+      // Weak indicators.
+      const weak = c(/\b(mill|milling|surface)\b/g);
+      // Negative indicators that should suppress false positives.
+      const negative = c(/\b(turn(ed)?\s*only|lathe\s*only|no\s*milling|turned\s*complete)\b/g) * 2;
+      // Setup cues often imply milling operations.
+      const setupCues = c(/\b(2nd\s*op|second\s*op|index|indexed|rotate\s*90|4th\s*axis|multiple\s*setups?)\b/g);
+      // Feature cues boost confidence when multiple non-turning features are present.
+      const featureCues = c(/\b(slot|pocket|keyway|flat(s)?|cross[-\s]*hole)\b/g);
+      const score = strong + medium + weak + setupCues - negative;
+      // Final decision: generic, conservative, and robust across print styles.
+      const hasMillwork =
+        score >= 3 ||
+        featureCues >= 2 ||
+        /\b(milled\s*(feature|surface|area)|requires\s*milling)\b/.test(text);
+      return { score, hasMillwork, featureCues };
+    }
     function analyzeFeatures(rawText) {
       const lower = normalizeText(rawText);
       const text = normalizeForOcrKeywords(lower);
@@ -170,6 +183,7 @@
       millingOps = count(
         /\b(mill|milling|mill[-\s]*work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
       );
+      const mw = millworkScore(text);
       detected = {
         holes: count(/\b(drill|hole|thru|through)\b/g),
         threads: count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) + uniqueThreadSizes.length,
@@ -189,16 +203,10 @@
         tightTol: has(/\.\s*001\b|±\s*0*\.0*01\b/),
         veryTightTol: has(/\.\s*0005\b|±\s*0*\.0*005\b/),
         deepFeatures: has(/\bdeep\b/),
-        multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/)
+        multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/),
+        hasMillwork: mw.hasMillwork,
+        millScore: mw.score
       };
-      const approxMillwork = hasMillworkApprox(text);
-      detected.hasMillwork =
-        approxMillwork ||
-        millingOps > 0 ||
-        detected.slots > 0 ||
-        detected.pockets > 0 ||
-        detected.keyways > 0 ||
-        detected.flats > 0;
     }
     function calculate() {
       if (!fileName || !detected) return;
@@ -263,6 +271,7 @@
         "Stub: " + (d.stub ? "YES" : "NO") + "\n" +
         "Stub ACME: " + (d.stubAcme ? "YES" : "NO") + "\n\n" +
         "Millwork Detected: " + (d.hasMillwork ? "YES" : "NO") + "\n" +
+        "Mill Score: " + (d.millScore || 0) + "\n" +
         "Slots: " + slots + "\n" +
         "Pockets: " + pockets + "\n" +
         "Keyways: " + keyways + "\n" +
@@ -291,10 +300,10 @@
         updateRawPreview();
         const arrayBuffer = await file.arrayBuffer();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        // Always run both: selectable PDF text + OCR.
         const pdfText = await extractTextFromPdf(pdf);
-        lastPdfText = pdfText;
-        // Always run OCR and merge with PDF text (more robust for scanned prints)
         const ocrText = await extractTextWithOCR(pdf, "Running OCR for print feature detection...");
+        lastPdfText = pdfText;
         lastOcrText = ocrText;
         const combined = (pdfText + " " + ocrText).trim();
         if (!combined) {
