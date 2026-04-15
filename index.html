@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CNC Quote System</title>
+  <title>CNC Quote System (PDF + OCR)</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       margin: 20px;
-      max-width: 900px;
+      max-width: 960px;
     }
     #drop {
       border: 2px dashed #888;
@@ -16,6 +16,7 @@
       border-radius: 8px;
       margin-bottom: 12px;
       background: #fafafa;
+      cursor: pointer;
     }
     .row {
       display: flex;
@@ -42,17 +43,24 @@
       padding: 10px;
       background: #f0f0f0;
       white-space: pre-wrap;
-      min-height: 220px;
+      min-height: 260px;
+    }
+    .hint {
+      color: #555;
+      font-size: 13px;
+      margin-top: 6px;
     }
   </style>
 </head>
 <body>
   <h2>CNC Quote System</h2>
-  <div id="drop">📄 Drag & Drop PDF Here</div>
+  <div id="drop">📄 Drag & Drop PDF Here (or click to pick file)</div>
+  <input id="picker" type="file" accept="application/pdf" style="display:none" />
   <div id="file">No file loaded</div>
+  <div class="hint">Scanned PDFs are supported with OCR fallback (slower).</div>
   <div class="row">
     <label>Qty: <input id="qty" type="number" value="10" min="1" /></label>
-    <label>Material Cost (per part $): <input id="matCost" type="number" value="25" step="0.01" /></label>
+    <label>Material Cost/Part ($): <input id="matCost" type="number" value="25" step="0.01" /></label>
   </div>
   <div class="row">
     <label>OD: <input id="od" type="number" value="2" step="0.001" /></label>
@@ -60,9 +68,11 @@
     <label>Length: <input id="length" type="number" value="4" step="0.001" /></label>
   </div>
   <pre id="out">Drop a PDF to begin.</pre>
+  <!-- PDF.js -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!-- OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script>
-    // Explicitly set worker to avoid silent parse failures
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
     const LATHE_RATE = 110;
@@ -71,91 +81,95 @@
     let fileName = "";
     let detected = null;
     let millingOps = 0;
+    const drop = document.getElementById("drop");
+    const picker = document.getElementById("picker");
+    const out = document.getElementById("out");
+    const fileDiv = document.getElementById("file");
     function volumeRemoved(od, id, len) {
       const ro = od / 2;
       const ri = id / 2;
       return (Math.PI * ro * ro * len) - (Math.PI * ri * ri * len);
     }
-    const drop = document.getElementById("drop");
-    const out = document.getElementById("out");
-    const fileDiv = document.getElementById("file");
-    drop.ondragover = (e) => e.preventDefault();
-    drop.ondragenter = (e) => e.preventDefault();
-    drop.ondrop = async (e) => {
-      e.preventDefault();
-      try {
-        const file = e.dataTransfer.files[0];
-        if (!file) {
-          out.textContent = "No file dropped.";
-          return;
-        }
-        fileName = file.name;
-        fileDiv.innerText = "Loaded: " + file.name;
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        let text = "";
-        for (let i = 1; i <= pdf.numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          text += " " + content.items.map((x) => x.str).join(" ");
-        }
-        if (!text.trim()) {
-          out.textContent =
-            "PDF loaded, but no selectable text found.\nThis is likely an image/scanned PDF (OCR required).";
-          return;
-        }
-        const lower = text
-          .toLowerCase()
-          .replace(/[\u2010-\u2015]/g, "-")
-          .replace(/\s+/g, " ")
-          .trim();
-        const count = (regex) => (lower.match(regex) || []).length;
-        const has = (regex) => regex.test(lower);
-        // Thread formats like: 1-8, 1.5-8, 7/8-9, 1-8 acme
-        const threadSizeRegex =
-          /\b(?:\d+(?:\.\d+)?|\d+\/\d+)-\d+\s*(?:unc|unf|un|acme)?\b/g;
-        const threadMatches = lower.match(threadSizeRegex) || [];
-        const uniqueThreadSizes = [...new Set(threadMatches)];
-        const hasAcme = has(/\bacme\b/);
-        const hasStub = has(/\bstub\b/);
-        const hasStubAcme = has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/);
-        // Includes "millwork" and "mill-work"
-        millingOps = count(
-          /\b(mill|milling|millwork|mill-work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
-        );
-        detected = {
-          holes: count(/\b(drill|hole|thru|through)\b/g),
-          threads:
-            count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) +
-            uniqueThreadSizes.length,
-          threadSize: uniqueThreadSizes.join(", "),
-          tpi: (lower.match(/\b\d+\s*tpi\b/g) || []).join(", "),
-          slots: count(/\b(slot|slt|profile|cut)\b/g),
-          pockets: count(/\b(pocket|cavity|remove|clear)\b/g),
-          keyways: count(/\b(keyway|key seat)\b/g),
-          flats: count(/\bflat(s)?\b/g),
-          grooves: count(/\b(groove|undercut)\b/g),
-          chamfers: count(/\bchamfer(s)?\b/g),
-          pin: has(/\b(pin|external thread|od thread|male thread)\b/),
-          box: has(/\b(box|internal thread|id thread|female thread|tap|unc|unf)\b/),
-          acme: hasAcme,
-          stub: hasStub,
-          stubAcme: hasStubAcme,
-          tightTol: has(/\.\s*001\b|±\s*0*\.0*01\b/),
-          veryTightTol: has(/\.\s*0005\b|±\s*0*\.0*005\b/),
-          deepFeatures: has(/\bdeep\b/),
-          multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/)
-        };
-        calculate();
-      } catch (err) {
-        console.error(err);
-        out.textContent = "PDF parse error: " + (err && err.message ? err.message : String(err));
+    function normalizeText(s) {
+      return s
+        .toLowerCase()
+        .replace(/[\u2010-\u2015]/g, "-") // normalize dash variants
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+    async function extractTextFromPdf(pdf) {
+      let text = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        text += " " + content.items.map((x) => x.str).join(" ");
       }
-    };
+      return text;
+    }
+    async function extractTextWithOCR(pdf) {
+      let ocrText = "";
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = document.createElement("canvas");
+        const ctx = canvas.getContext("2d");
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const result = await Tesseract.recognize(canvas, "eng", {
+          logger: (m) => {
+            if (m.status === "recognizing text") {
+              out.textContent =
+                `No selectable text found. Running OCR...\n` +
+                `Page ${i}/${pdf.numPages} - ${Math.round(m.progress * 100)}%`;
+            }
+          }
+        });
+        ocrText += " " + result.data.text;
+      }
+      return ocrText;
+    }
+    function analyzeFeatures(rawText) {
+      const lower = normalizeText(rawText);
+      const count = (regex) => (lower.match(regex) || []).length;
+      const has = (regex) => regex.test(lower);
+      // Thread formats: 1-8, 1.5-8, 7/8-9, etc.
+      const threadSizeRegex =
+        /\b(?:\d+(?:\.\d+)?|\d+\/\d+)-\d+\s*(?:unc|unf|un|acme)?\b/g;
+      const threadMatches = lower.match(threadSizeRegex) || [];
+      const uniqueThreadSizes = [...new Set(threadMatches)];
+      const hasAcme = has(/\bacme\b/);
+      const hasStub = has(/\bstub\b/);
+      const hasStubAcme = has(/\bstub[-\s]*acme\b|\bacme[-\s]*stub\b/);
+      // Better millwork detection
+      millingOps = count(
+        /\b(mill|milling|millwork|mill-work|profile|slot|pocket|face(?:\s*mill)?|keyway|cavity|contour|surface)\b/g
+      );
+      detected = {
+        holes: count(/\b(drill|hole|thru|through)\b/g),
+        threads:
+          count(/\b(tap|thread(?:ed|ing)?|unc|unf|acme)\b/g) + uniqueThreadSizes.length,
+        threadSize: uniqueThreadSizes.join(", "),
+        tpi: (lower.match(/\b\d+\s*tpi\b/g) || []).join(", "),
+        slots: count(/\b(slot|slt|profile|cut)\b/g),
+        pockets: count(/\b(pocket|cavity|remove|clear)\b/g),
+        keyways: count(/\b(keyway|key seat)\b/g),
+        flats: count(/\bflat(s)?\b/g),
+        grooves: count(/\b(groove|undercut)\b/g),
+        chamfers: count(/\bchamfer(s)?\b/g),
+        pin: has(/\b(pin|external thread|od thread|male thread)\b/),
+        box: has(/\b(box|internal thread|id thread|female thread|tap|unc|unf)\b/),
+        acme: hasAcme,
+        stub: hasStub,
+        stubAcme: hasStubAcme,
+        tightTol: has(/\.\s*001\b|±\s*0*\.0*01\b/),
+        veryTightTol: has(/\.\s*0005\b|±\s*0*\.0*005\b/),
+        deepFeatures: has(/\bdeep\b/),
+        multiOp: has(/\b(flip|2nd op|second op|multiple setups?)\b/)
+      };
+    }
     function calculate() {
-      if (!fileName || !detected) {
-        return;
-      }
+      if (!fileName || !detected) return;
       const d = detected;
       const holes = d.holes || 0;
       const threads = d.threads || 0;
@@ -168,7 +182,7 @@
       const od = +document.getElementById("od").value || 0;
       const id = +document.getElementById("id").value || 0;
       const len = +document.getElementById("length").value || 0;
-      // LATHE
+      // Lathe
       let lathe = 0.25;
       lathe += volumeRemoved(od, id, len) * 0.02;
       lathe += threads * 0.08;
@@ -177,12 +191,12 @@
       if (d.pin) lathe += 0.25;
       if (d.box) lathe += 0.35;
       if (d.stubAcme) lathe += 0.5;
-      lathe += d.grooves * 0.05;
-      lathe += d.chamfers * 0.02;
+      lathe += (d.grooves || 0) * 0.05;
+      lathe += (d.chamfers || 0) * 0.02;
       if (d.tightTol) lathe += 0.25;
       if (d.veryTightTol) lathe += 0.5;
       if (d.multiOp) lathe += 0.4;
-      // MILL
+      // Mill
       let mill = 0.4;
       mill += holes * 0.04;
       mill += slots * 0.12;
@@ -194,7 +208,7 @@
       if (d.tightTol) mill += 0.2;
       if (d.veryTightTol) mill += 0.4;
       if (d.multiOp) mill += 0.5;
-      // PROGRAM
+      // Programming
       let prog = 0.8;
       prog += threads * 0.1;
       prog += slots * 0.05;
@@ -231,7 +245,51 @@
         "Price/Part: $" + price.toFixed(2) + "\n" +
         "Total: $" + total.toFixed(2);
     }
-    document.querySelectorAll("input").forEach((el) => {
+    async function processFile(file) {
+      try {
+        if (!file) return;
+        if (!/\.pdf$/i.test(file.name)) {
+          out.textContent = "Please load a PDF file.";
+          return;
+        }
+        fileName = file.name;
+        fileDiv.textContent = "Loaded: " + fileName;
+        out.textContent = "Reading PDF...";
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let text = await extractTextFromPdf(pdf);
+        // OCR fallback for scanned/image PDFs
+        if (!text.trim()) {
+          text = await extractTextWithOCR(pdf);
+        }
+        if (!text.trim()) {
+          out.textContent = "Could not extract text, even with OCR. Try a clearer scan.";
+          return;
+        }
+        analyzeFeatures(text);
+        calculate();
+      } catch (err) {
+        console.error(err);
+        out.textContent = "PDF parse error: " + (err && err.message ? err.message : String(err));
+      }
+    }
+    // Drag/drop
+    drop.ondragover = (e) => e.preventDefault();
+    drop.ondragenter = (e) => e.preventDefault();
+    drop.ondrop = async (e) => {
+      e.preventDefault();
+      const file = e.dataTransfer.files[0];
+      await processFile(file);
+    };
+    // Click to browse
+    drop.onclick = () => picker.click();
+    picker.onchange = async (e) => {
+      const file = e.target.files[0];
+      await processFile(file);
+      picker.value = "";
+    };
+    // Recalculate when manual values change
+    document.querySelectorAll("input[type='number']").forEach((el) => {
       el.addEventListener("input", calculate);
     });
   </script>
