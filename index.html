@@ -73,7 +73,18 @@ drop.ondrop = async (e) => {
   }
 
   // 🔥 normalize ugly PDF text
-  const lower = text.toLowerCase().replace(/\s+/g, " ");
+ let lower = text.toLowerCase();
+
+// remove weird spacing like "7 . 750" → "7.750"
+lower = lower.replace(/(\d)\s*\.\s*(\d)/g, "$1.$2");
+
+// remove spacing between letters: "a c m e" → "acme"
+lower = lower.replace(/([a-z])\s+(?=[a-z])/g, "$1");
+
+// collapse everything
+lower = lower.replace(/\s+/g, " ");
+
+console.log("CLEANED TEXT:", lower);
 
   function count(regex){
     return (lower.match(regex) || []).length;
@@ -87,43 +98,46 @@ drop.ondrop = async (e) => {
   const hasAcme = /a\s*c\s*m\s*e/.test(lower);
   const hasStub = /s\s*t\s*u\s*b/.test(lower);
 
-  window.detected = {
+  const threadMatches = lower.match(/\d+\.\d+\s*-\s*\d+/g) || [];
 
-    holes: count(/drill|hole|thru|through/g),
+window.detected = {
 
-    threads: threadMatches.length,
-    threadSize: threadMatches.join(", "),
-    tpi: (lower.match(/\d+\s*tpi|\d+\s*rd/g) || []).join(", "),
+  holes: count(/drill|hole|thru|through/g),
 
-    // 🔥 FEATURE DETECTION (REAL PRINTS)
-    slots: count(/slot|slt|obround|radius|r\./g),
-    pockets: count(/pocket|cavity|counterbore|c'bore|spotface/g),
-    keyways: count(/keyway|key seat|key/g),
-    flats: count(/flat/g),
+  // 🔥 THREADS (NOW RELIABLE)
+  threads: threadMatches.length,
+  threadSize: threadMatches.join(", "),
+  tpi: (lower.match(/\d+\s*tpi|\d+\s*rd/g) || []).join(", "),
 
-    grooves: count(/groove|undercut/g),
-    chamfers: count(/chamfer/g),
+  // 🔥 FEATURE DETECTION (EXPANDED)
+  slots: count(/slot|slt|obround/g),
+  pockets: count(/pocket|cavity|counterbore|spotface/g),
+  keyways: count(/keyway|key seat|key/g),
+  flats: count(/flat/g),
 
-    // 🔥 THREAD TYPES (FIXED)
-    acme: hasAcme,
-    stub: hasStub,
-    stubAcme: hasAcme && hasStub,
+  grooves: count(/groove|undercut/g),
+  chamfers: count(/chamfer/g),
 
-    // 🔥 PIN / BOX
-    pin: /pin|external|od thread/.test(lower),
-    box: /box|internal|id thread|tap|unc|unf/.test(lower),
+  // 🔥 THREAD TYPES (BULLETPROOF)
+  acme: lower.includes("acme"),
+  stub: lower.includes("stub"),
+  stubAcme: lower.includes("stub") && lower.includes("acme"),
 
-    // 🔥 GEOMETRY INTELLIGENCE
-    patternCount: count(/\d+\s*plcs/g),
-    slotLike: count(/radius|r\s*\.\d+/g),
-    profileDims: count(/\d+\.\d{3}/g),
+  // 🔥 PIN / BOX
+  pin: /pin|external|od thread/.test(lower),
+  box: /box|internal|id thread|tap|unc|unf/.test(lower),
 
-    tightTol: lower.includes(".001"),
-    veryTightTol: lower.includes(".0005"),
+  // 🔥 REAL GEOMETRY DETECTION
+  patternCount: count(/\d+\s*plcs/g),
+  slotLike: count(/radius|r\./g),
+  profileDims: count(/\d+\.\d{3}/g),
 
-    deepFeatures: lower.includes("deep"),
-    multiOp: lower.includes("flip") || lower.includes("2nd op")
-  };
+  tightTol: lower.includes(".001"),
+  veryTightTol: lower.includes(".0005"),
+
+  deepFeatures: lower.includes("deep"),
+  multiOp: lower.includes("flip") || lower.includes("2nd op")
+};
 
   window.millingOps = count(/mill|profile|slot|pocket|cut|face/g);
 
@@ -198,16 +212,16 @@ function calculate(){
   // =========================
   let mill = 0;
 
-  const hasMill =
-    holes > 0 ||
-    slots > 0 ||
-    pockets > 0 ||
-    keyways > 0 ||
-    flats > 0 ||
-    d.patternCount > 0 ||
-    d.slotLike > 0 ||
-    d.profileDims > 5 ||
-    (d.patternCount > 0 && d.slotLike > 0);
+ const hasMill =
+  holes > 0 ||
+  slots > 0 ||
+  pockets > 0 ||
+  keyways > 0 ||
+  flats > 0 ||
+
+  d.patternCount > 0 ||     // 🔥 KEY FOR YOUR PRINT
+  d.slotLike > 0 ||         // 🔥 radii = slots
+  d.profileDims > 3;        // 🔥 dimension-heavy = milling
 
   if (hasMill) {
 
@@ -223,6 +237,10 @@ function calculate(){
     mill += d.patternCount * 0.12;
     mill += d.slotLike * 0.05;
     mill += d.profileDims * 0.02;
+    
+    if (d.patternCount >= 2 && d.slotLike >= 2) {
+    mill += 1.2;
+    }
 
     // 🔥 REAL PRINT BOOST
     if (d.patternCount >= 2 && d.slotLike >= 2) {
